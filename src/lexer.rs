@@ -1,8 +1,8 @@
-use crate::error::{Error, Result};
-use crate::file::File;
+use crate::error::*;
 use unic_ucd_category::GeneralCategory;
 use unic_ucd_common::is_white_space;
 
+#[derive(Debug, PartialEq)]
 pub enum Token {
     IntLiteral(i64),
     Ident(String),
@@ -21,7 +21,6 @@ pub enum Token {
     Period,
     Colon,
     Hash,
-    Eof,
 }
 
 const after_ident_chars: [char; 8] = [
@@ -58,14 +57,14 @@ fn is_starting_ident_character(c: char) -> bool {
     }
 }
 
-fn read_token(file: &mut File<char>) -> Result<Option<Token>> {
+fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
     use Token::*;
-    let mut c = file.read().map(|x| *x);
+    let mut c = chars.pop();
     while let Some(c0) = c {
         if !is_white_space(c0) {
             break;
         }
-        c = file.read().map(|x| *x);
+        c = chars.pop();
     }
     let c0 = match c {
         Some(c0) => c0,
@@ -88,9 +87,11 @@ fn read_token(file: &mut File<char>) -> Result<Option<Token>> {
                     break;
                 }
                 n = 10 * n + (c0 as i64 - '0' as i64);
-                c = file.read().map(|x| *x);
+                c = chars.pop();
             }
-            file.step_back();
+            if let Some(c0) = c {
+                chars.push(c0);
+            }
             if c.map_or(false, |c| !(is_white_space(c) || after_ident_chars.contains(&c))) {
                 return Err(Error::UnexpectedChar(c));
             }
@@ -103,9 +104,11 @@ fn read_token(file: &mut File<char>) -> Result<Option<Token>> {
                     break;
                 }
                 s.push(c0);
-                c = file.read().map(|x| *x);
+                c = chars.pop();
             }
-            file.step_back();
+            if let Some(c0) = c {
+                chars.push(c0);
+            }
             if c.map_or(false, |c| !(is_white_space(c) || after_ident_chars.contains(&c))) {
                 return Err(Error::UnexpectedChar(c));
             }
@@ -123,10 +126,11 @@ fn read_token(file: &mut File<char>) -> Result<Option<Token>> {
     }))
 }
 
-pub fn read_file_tokens(mut file: File<char>) -> Result<File<Token>> {
+pub fn read_file_tokens(mut chars: Vec<char>) -> Result<Vec<Token>> {
     let mut v = Vec::new();
-    while let Some(t) = read_token(&mut file)? {
+    while let Some(t) = read_token(&mut chars)? {
         v.push(t);
     }
-    Ok(File::new(v.into_boxed_slice()))
+    v.reverse();
+    Ok(v)
 }
