@@ -23,11 +23,11 @@ pub enum Token {
     Hash,
 }
 
-const after_ident_chars: [char; 8] = [
+const AFTER_IDENT_CHARS: [char; 8] = [
     '(', ')', '[', ']', '{', '}', '.', ':',
 ];
 
-const permitted_punctuation: [char; 19] = [
+const PERMITTED_PUNCTUATION: [char; 19] = [
     '*', '/', '\\',
     '′', '″', '‴', '‵', '‶', '‷', '⁂', '⁗', '⁎', '⁑', '⁕',
     '﹡', '﹨', '＊', '／', '＼',
@@ -41,7 +41,7 @@ fn is_ident_character(c: char) -> bool {
         DecimalNumber | LetterNumber | OtherNumber => true,
         ConnectorPunctuation | DashPunctuation => true,
         OpenPunctuation | ClosePunctuation | InitialPunctuation | FinalPunctuation => false,
-        OtherPunctuation => permitted_punctuation.contains(&c),
+        OtherPunctuation => PERMITTED_PUNCTUATION.contains(&c),
         MathSymbol | CurrencySymbol | ModifierSymbol | OtherSymbol => true,
         SpaceSeparator | LineSeparator | ParagraphSeparator => false,
         Control | Format | Surrogate | PrivateUse | Unassigned => false,
@@ -92,7 +92,7 @@ fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
             if let Some(c0) = c {
                 chars.push(c0);
             }
-            if c.map_or(false, |c| !(is_white_space(c) || after_ident_chars.contains(&c))) {
+            if c.map_or(false, |c| !(is_white_space(c) || AFTER_IDENT_CHARS.contains(&c))) {
                 return Err(Error::UnexpectedChar(c));
             }
             IntLiteral(n)
@@ -109,7 +109,7 @@ fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
             if let Some(c0) = c {
                 chars.push(c0);
             }
-            if c.map_or(false, |c| !(is_white_space(c) || after_ident_chars.contains(&c))) {
+            if c.map_or(false, |c| !(is_white_space(c) || AFTER_IDENT_CHARS.contains(&c))) {
                 return Err(Error::UnexpectedChar(c));
             }
             match &s[..] {

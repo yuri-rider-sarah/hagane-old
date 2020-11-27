@@ -16,11 +16,10 @@ pub enum UExpr {
 }
 
 #[derive(Debug)]
-pub struct Expr(UExpr, Type);
+pub struct Expr(pub UExpr, pub Option<Type>);
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Type {
-    Blank,
     Named(String),
     Tuple(Vec<Type>),
     Function(Vec<Type>, Box<Type>),
@@ -55,31 +54,31 @@ fn read_simple_expr(tokens: &mut Vec<Token>) -> Result<Expr> {
         ),
         Token::Let => Expr(
             UExpr::Let(Box::new(read_expr(tokens)?), Box::new(read_expr(tokens)?)),
-            Type::Blank,
+            None,
         ),
         Token::Set => Expr(
             UExpr::Set(Box::new(read_expr(tokens)?), Box::new(read_expr(tokens)?)),
-            Type::Blank,
+            None,
         ),
         Token::Match => Expr(
             UExpr::Match(Box::new(read_expr(tokens)?), read_match_body(tokens)?),
-            Type::Blank,
+            None,
         ),
         Token::While => Expr(
             UExpr::While(Box::new(read_expr(tokens)?), read_block(tokens)?),
-            Type::Blank,
+            None,
         ),
         Token::Do => Expr(
             UExpr::Do(read_block(tokens)?),
-            Type::Blank,
+            None,
         ),
         Token::Lambda => Expr(
             UExpr::Lambda(read_arg_list(tokens)?, read_block(tokens)?),
-            Type::Blank,
+            read_type_signature(tokens)?,
         ),
         Token::Hash => Expr(
             UExpr::Tuple(read_arg_list(tokens)?),
-            Type::Blank,
+            None,
         ),
         t => return Err(Error::UnexpectedToken(Some(t))),
     })
@@ -124,13 +123,13 @@ fn read_arg_list(tokens: &mut Vec<Token>) -> Result<Vec<Expr>> {
     read_bracketed_list(tokens, Token::LParen, Token::RParen, read_expr)
 }
 
-fn read_type_signature(tokens: &mut Vec<Token>) -> Result<Type> {
+fn read_type_signature(tokens: &mut Vec<Token>) -> Result<Option<Type>> {
     Ok(match tokens.last() {
         Some(Token::Period) => {
             let _ = read_token(tokens)?;
-            read_type(tokens)?
+            Some(read_type(tokens)?)
         },
-        _ => Type::Blank,
+        _ => None,
     })
 }
 
@@ -139,14 +138,15 @@ fn read_type(tokens: &mut Vec<Token>) -> Result<Type> {
         Token::Ident(name) => Type::Named(name),
         Token::Hash => Type::Tuple(read_func_type_param_list(tokens)?),
         Token::LParen => {
+            tokens.push(Token::LParen);
             let params = read_func_type_param_list(tokens)?;
             match read_token(tokens)? {
-                Token::LBrace => (),
+                Token::LBracket => (),
                 t => return Err(Error::UnexpectedToken(Some(t))),
             }
             let ret = read_type(tokens)?;
             match read_token(tokens)? {
-                Token::RBrace => (),
+                Token::RBracket => (),
                 t => return Err(Error::UnexpectedToken(Some(t))),
             }
             Type::Function(params, Box::new(ret))
