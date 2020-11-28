@@ -18,13 +18,13 @@ pub enum Token {
     RBracket,
     LBrace,
     RBrace,
-    Period,
+    Apostrophe,
     Colon,
     Hash,
 }
 
 const AFTER_IDENT_CHARS: [char; 8] = [
-    '(', ')', '[', ']', '{', '}', '.', ':',
+    '(', ')', '[', ']', '{', '}', '\'', ':',
 ];
 
 const PERMITTED_PUNCTUATION: [char; 19] = [
@@ -77,7 +77,7 @@ fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
         ']' => RBracket,
         '{' => LBrace,
         '}' => RBrace,
-        '.' => Period,
+        '\'' => Apostrophe,
         ':' => Colon,
         '#' => Hash,
         '0'..='9' => {
@@ -106,20 +106,24 @@ fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
                 s.push(c0);
                 c = chars.pop();
             }
-            if let Some(c0) = c {
-                chars.push(c0);
-            }
-            if c.map_or(false, |c| !(is_white_space(c) || AFTER_IDENT_CHARS.contains(&c))) {
-                return Err(Error::UnexpectedChar(c));
-            }
-            match &s[..] {
-                "let" => Let,
-                "set" => Set,
-                "match" => Match,
-                "while" => While,
-                "do" => Do,
-                "λ" => Lambda,
-                _ => Ident(s),
+            if c == Some('.') {
+                match &s[..] {
+                    "let" => Let,
+                    "set" => Set,
+                    "match" => Match,
+                    "while" => While,
+                    "do" => Do,
+                    "λ" => Lambda,
+                    _ => return Err(Error::InvalidKeyword(s)),
+                }
+            } else {
+                if let Some(c0) = c {
+                    chars.push(c0);
+                    if !(is_white_space(c0) || AFTER_IDENT_CHARS.contains(&c0)) {
+                        return Err(Error::UnexpectedChar(c));
+                    }
+                }
+                Ident(s)
             }
         },
         _ => return Err(Error::UnexpectedChar(c)),

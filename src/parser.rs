@@ -30,19 +30,6 @@ fn read_token(tokens: &mut Vec<Token>) -> Result<Token> {
 }
 
 pub fn read_expr(tokens: &mut Vec<Token>) -> Result<Expr> {
-    let mut expr = read_simple_expr(tokens)?;
-    loop {
-        match tokens.last() {
-            Some(&Token::LParen) => expr = Expr(
-                UExpr::Call(Box::new(expr), read_arg_list(tokens)?),
-                read_type_signature(tokens)?,
-            ),
-            _ => return Ok(expr),
-        }
-    }
-}
-
-fn read_simple_expr(tokens: &mut Vec<Token>) -> Result<Expr> {
     Ok(match read_token(tokens)? {
         Token::IntLiteral(n) => Expr(
             UExpr::IntLiteral(n),
@@ -72,13 +59,17 @@ fn read_simple_expr(tokens: &mut Vec<Token>) -> Result<Expr> {
             UExpr::Do(read_block(tokens)?),
             None,
         ),
+        Token::LParen => Expr(
+            UExpr::Call(Box::new(read_expr(tokens)?), read_arg_list_r(tokens)?),
+            read_type_signature(tokens)?,
+        ),
         Token::Lambda => Expr(
             UExpr::Lambda(read_arg_list(tokens)?, read_block(tokens)?),
             read_type_signature(tokens)?,
         ),
         Token::Hash => Expr(
             UExpr::Tuple(read_arg_list(tokens)?),
-            None,
+            read_type_signature(tokens)?,
         ),
         t => return Err(Error::UnexpectedToken(Some(t))),
     })
@@ -94,15 +85,15 @@ fn read_match_branch(tokens: &mut Vec<Token>) -> Result<(Expr, Vec<Expr>)> {
     Ok((pattern, body))
 }
 
-fn read_bracketed_list<T>(tokens: &mut Vec<Token>, left: Token, right: Token, read_element: fn(&mut Vec<Token>) -> Result<T>) -> Result<Vec<T>> {
-    let t = read_token(tokens)?;
-    if t != left {
-        return Err(Error::UnexpectedToken(Some(t)));
-    }
+fn read_bracketed_list_r<T>(
+    tokens: &mut Vec<Token>,
+    is_right: fn(&Token) -> bool,
+    read_element: fn(&mut Vec<Token>,
+) -> Result<T>) -> Result<Vec<T>> {
     let mut v = Vec::new();
     loop {
         let t = read_token(tokens)?;
-        if t == right {
+        if is_right(&t) {
             return Ok(v);
         } else {
             tokens.push(t);
@@ -111,21 +102,38 @@ fn read_bracketed_list<T>(tokens: &mut Vec<Token>, left: Token, right: Token, re
     }
 }
 
+fn read_bracketed_list<T>(
+    tokens: &mut Vec<Token>,
+    is_left: fn(&Token) -> bool,
+    is_right: fn(&Token) -> bool,
+    read_element: fn(&mut Vec<Token>,
+) -> Result<T>) -> Result<Vec<T>> {
+    let t = read_token(tokens)?;
+    if !is_left(&t) {
+        return Err(Error::UnexpectedToken(Some(t)));
+    }
+    read_bracketed_list_r(tokens, is_right, read_element)
+}
+
 fn read_block(tokens: &mut Vec<Token>) -> Result<Vec<Expr>> {
-    read_bracketed_list(tokens, Token::LBrace, Token::RBrace, read_expr)
+    read_bracketed_list(tokens, |t| *t == Token::LBrace, |t| *t == Token::RBrace, read_expr)
 }
 
 fn read_match_body(tokens: &mut Vec<Token>) -> Result<Vec<(Expr, Vec<Expr>)>> {
-    read_bracketed_list(tokens, Token::LBrace, Token::RBrace, read_match_branch)
+    read_bracketed_list(tokens, |t| *t == Token::LBrace, |t| *t == Token::RBrace, read_match_branch)
 }
 
 fn read_arg_list(tokens: &mut Vec<Token>) -> Result<Vec<Expr>> {
-    read_bracketed_list(tokens, Token::LParen, Token::RParen, read_expr)
+    read_bracketed_list(tokens, |t| *t == Token::LParen, |t| *t == Token::RParen, read_expr)
+}
+
+fn read_arg_list_r(tokens: &mut Vec<Token>) -> Result<Vec<Expr>> {
+    read_bracketed_list_r(tokens, |t| *t == Token::RParen, read_expr)
 }
 
 fn read_type_signature(tokens: &mut Vec<Token>) -> Result<Option<Type>> {
     Ok(match tokens.last() {
-        Some(Token::Period) => {
+        Some(Token::Apostrophe) => {
             let _ = read_token(tokens)?;
             Some(read_type(tokens)?)
         },
@@ -138,16 +146,11 @@ fn read_type(tokens: &mut Vec<Token>) -> Result<Type> {
         Token::Ident(name) => Type::Named(name),
         Token::Hash => Type::Tuple(read_func_type_param_list(tokens)?),
         Token::LParen => {
-            tokens.push(Token::LParen);
-            let params = read_func_type_param_list(tokens)?;
-            match read_token(tokens)? {
-                Token::LBracket => (),
-                t => return Err(Error::UnexpectedToken(Some(t))),
-            }
+            let params = read_func_type_param_list_rc(tokens)?;
             let ret = read_type(tokens)?;
-            match read_token(tokens)? {
-                Token::RBracket => (),
-                t => return Err(Error::UnexpectedToken(Some(t))),
+            let right = read_token(tokens)?;
+            if right != Token::RParen {
+                return Err(Error::UnexpectedToken(Some(right)));
             }
             Type::Function(params, Box::new(ret))
         },
@@ -156,5 +159,9 @@ fn read_type(tokens: &mut Vec<Token>) -> Result<Type> {
 }
 
 fn read_func_type_param_list(tokens: &mut Vec<Token>) -> Result<Vec<Type>> {
-    read_bracketed_list(tokens, Token::LParen, Token::RParen, read_type)
+    read_bracketed_list(tokens, |t| *t == Token::LParen, |t| *t == Token::RParen, read_type)
+}
+
+fn read_func_type_param_list_rc(tokens: &mut Vec<Token>) -> Result<Vec<Type>> {
+    read_bracketed_list_r(tokens, |t| *t == Token::Colon, read_type)
 }
