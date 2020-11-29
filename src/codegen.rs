@@ -3,6 +3,7 @@ use crate::parser::Expr;
 use crate::parser::UExpr::*;
 use crate::parser::Type;
 use std::ffi::CString;
+use llvm_sys::*;
 use llvm_sys::prelude::*;
 use llvm_sys::core::*;
 
@@ -14,12 +15,12 @@ struct Context {
 
 pub unsafe fn codegen_top(exprs: &Vec<Expr>) -> Result<LLVMModuleRef> {
     let c_name = CString::new("module").unwrap();
-    let module = LLVMModuleCreateWithName(c_name.as_ptr() as *const i8);
+    let module = LLVMModuleCreateWithName(c_name.as_ptr());
     let main_func_type = get_llvm_function_type(&Vec::new(), &Type::Tuple(Vec::new()))?;
-    let func_c_name = CString::new("main").unwrap();
-    let func = LLVMAddFunction(module, func_c_name.as_ptr() as *const i8, main_func_type);
+    let func_c_name = CString::new("hagane_main").unwrap();
+    let func = LLVMAddFunction(module, func_c_name.as_ptr(), main_func_type);
     let entry_c_name = CString::new("entry").unwrap();
-    let entry = LLVMAppendBasicBlock(func, entry_c_name.as_ptr() as *const i8);
+    let entry = LLVMAppendBasicBlock(func, entry_c_name.as_ptr());
     let builder = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(builder, entry);
     let (ret_val, ret_type) = codegen_block(exprs, &mut Context { module, builder, names: Vec::new() })?;
@@ -37,7 +38,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
         Ident(name) => {
             let (ptr, type_) = resolve_name(&context.names, name)?;
             let c_name = CString::new(&name[..]).unwrap();
-            (LLVMBuildLoad(context.builder, ptr, c_name.as_ptr() as *const i8), type_)
+            (LLVMBuildLoad(context.builder, ptr, c_name.as_ptr()), type_)
         },
         Tuple(exprs) => {
             let (values, types) = codegen_group(exprs, context)?;
@@ -46,7 +47,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let mut tuple = LLVMGetUndef(llvm_type);
             for (i, &element) in values.iter().enumerate() {
                 let c_name = CString::new("tuple").unwrap();
-                tuple = LLVMBuildInsertValue(context.builder, tuple, element, i as u32, c_name.as_ptr() as *const i8);
+                tuple = LLVMBuildInsertValue(context.builder, tuple, element, i as u32, c_name.as_ptr());
             }
             (tuple, type_)
         },
@@ -62,14 +63,16 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 _ => return Err(Error::NotAFunction(func_type)),
             };
             let c_name = CString::new(if ret_type == Type::Tuple(Vec::new()) { "" } else { "call" }).unwrap();
-            (LLVMBuildCall(context.builder, func_value, arg_values.as_mut_ptr(), args.len() as u32, c_name.as_ptr() as *const i8), ret_type)
+            let call = LLVMBuildCall(context.builder, func_value, arg_values.as_mut_ptr(), args.len() as u32, c_name.as_ptr());
+            LLVMSetInstructionCallConv(call, LLVMCallConv::LLVMFastCallConv as u32);
+            (call, ret_type)
         },
         Let(name, expr) => match &**name {
             Expr(Ident(name), stated_type) => {
                 let (value, type_) = codegen(expr, context)?;
                 check_type_compat(stated_type, &type_)?;
                 let c_name = CString::new(&name[..]).unwrap();
-                let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&type_)?, c_name.as_ptr() as *const i8);
+                let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&type_)?, c_name.as_ptr());
                 LLVMBuildStore(context.builder, value, ptr);
                 context.names.push((name.clone(), ptr, type_));
                 codegen_unit()
@@ -105,10 +108,12 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 _ => return Err(Error::NotAFunction(type_)),
             };
             let func_c_name = CString::new("lambda").unwrap();
-            let func = LLVMAddFunction(context.module, func_c_name.as_ptr() as *const i8, get_llvm_function_type(param_types, ret_type)?);
+            let func = LLVMAddFunction(context.module, func_c_name.as_ptr(), get_llvm_function_type(param_types, ret_type)?);
+            LLVMSetLinkage(func, LLVMLinkage::LLVMPrivateLinkage);
+            LLVMSetFunctionCallConv(func, LLVMCallConv::LLVMFastCallConv as u32);
             let old_names_len = context.names.len();
             let entry_c_name = CString::new("entry").unwrap();
-            let entry = LLVMAppendBasicBlock(func, entry_c_name.as_ptr() as *const i8);
+            let entry = LLVMAppendBasicBlock(func, entry_c_name.as_ptr());
             LLVMPositionBuilderAtEnd(context.builder, entry);
             for (i, (Expr(name, stated_param_type), param_type)) in Iterator::zip(expr_params.iter(), param_types.iter()).enumerate() {
                 match name {
@@ -116,7 +121,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                         check_type_compat(&stated_param_type, param_type)?;
                         let value = LLVMGetParam(func, i as u32);
                         let c_name = CString::new(&name[..]).unwrap();
-                        let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&param_type)?, c_name.as_ptr() as *const i8);
+                        let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&param_type)?, c_name.as_ptr());
                         LLVMBuildStore(context.builder, value, ptr);
                         LLVMSetValueName2(value, name.as_ptr() as *const i8, name.len());
                         context.names.push((name.clone(), ptr, param_type.clone()));
