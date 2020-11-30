@@ -11,7 +11,8 @@ use llvm_sys::target::*;
 use llvm_sys::target_machine::*;
 
 fn main() {
-    let mut chars: Vec<_> = std::fs::read_to_string("/dev/stdin").unwrap().chars().collect();
+    let src_file = std::env::args().nth(1).unwrap();
+    let mut chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
     chars.reverse();
     let mut tokens = lexer::read_file_tokens(chars).unwrap();
     let mut exprs = Vec::new();
@@ -28,11 +29,11 @@ fn main() {
         let mut target = std::ptr::null_mut();
         let mut error = std::ptr::null_mut();
         if LLVMGetTargetFromTriple(target_triple, &mut target, &mut error) != 0 {
-            print!("Error getting target from triple");
+            eprint!("Error getting target from triple");
             if !error.is_null() {
-                println!(": {}", CStr::from_ptr(error).to_string_lossy());
+                eprintln!(": {}", CStr::from_ptr(error).to_string_lossy());
             } else {
-                println!("");
+                eprintln!("");
             }
             std::process::exit(1);
         }
@@ -50,17 +51,24 @@ fn main() {
         let module = codegen::codegen_top(&exprs).unwrap();
         LLVMSetModuleDataLayout(module, LLVMCreateTargetDataLayout(target_machine));
         LLVMSetTarget(module, target_triple);
-        let result = LLVMPrintModuleToString(module);
-        println!("{}", CStr::from_ptr(result).to_string_lossy());
         LLVMVerifyModule(module, LLVMVerifierFailureAction::LLVMAbortProcessAction, std::ptr::null_mut());
-        let mut filename = CString::new("output.o").unwrap().into_bytes_with_nul();
-        if LLVMTargetMachineEmitToFile(target_machine, module, filename.as_mut_ptr() as *mut i8, LLVMCodeGenFileType::LLVMObjectFile, &mut error) != 0 {
-            print!("Error emitting code to file");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let obj_path = temp_dir.path().clone().join(std::path::Path::new("object.o")).to_str().unwrap().to_string();
+        let mut c_obj_path = CString::new(&obj_path[..]).unwrap().into_bytes_with_nul();
+        if LLVMTargetMachineEmitToFile(target_machine, module, c_obj_path.as_mut_ptr() as *mut i8, LLVMCodeGenFileType::LLVMObjectFile, &mut error) != 0 {
+            eprint!("Error emitting code to file");
             if !error.is_null() {
-                println!(": {}", CStr::from_ptr(error).to_string_lossy());
+                eprintln!(": {}", CStr::from_ptr(error).to_string_lossy());
             } else {
-                println!("");
+                eprintln!("");
             }
+            std::process::exit(1);
+        }
+        let program_main: &[u8] = std::include_bytes!("program_main.c");
+        let main_path = temp_dir.path().clone().join(std::path::Path::new("main.c")).to_str().unwrap().to_string();
+        std::fs::write(&main_path, program_main).unwrap();
+        let clang_exit_code = std::process::Command::new("clang").args(&[&obj_path[..], &main_path[..], "-static", "-o", "program"]).status().unwrap();
+        if !clang_exit_code.success() {
             std::process::exit(1);
         }
     };

@@ -1,8 +1,8 @@
 #include <stdio.h>
-#include <stdint.h>
+#include <inttypes.h>
 
 void print(int64_t n) {
-    printf("%d\n", n);
+    printf("%"PRId64"\n", n);
 }
 
 extern void hagane_main(void);
