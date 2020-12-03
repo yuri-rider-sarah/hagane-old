@@ -52,7 +52,11 @@ fn main() {
         let module = codegen::codegen_top(&exprs).unwrap();
         LLVMSetModuleDataLayout(module, LLVMCreateTargetDataLayout(target_machine));
         LLVMSetTarget(module, target_triple);
-        LLVMVerifyModule(module, LLVMVerifierFailureAction::LLVMAbortProcessAction, std::ptr::null_mut());
+        if LLVMVerifyModule(module, LLVMVerifierFailureAction::LLVMPrintMessageAction, std::ptr::null_mut()) != 0 {
+            eprintln!("Module:");
+            eprintln!("{}", std::ffi::CStr::from_ptr(LLVMPrintModuleToString(module)).to_string_lossy());
+            std::process::exit(1);
+        }
         let temp_dir = tempfile::tempdir().unwrap();
         let obj_path = temp_dir.path().clone().join(std::path::Path::new("object.o")).to_str().unwrap().to_string();
         let mut c_obj_path = CString::new(&obj_path[..]).unwrap().into_bytes_with_nul();
@@ -68,7 +72,10 @@ fn main() {
         let program_main: &[u8] = std::include_bytes!("program_main.c");
         let main_path = temp_dir.path().clone().join(std::path::Path::new("main.c")).to_str().unwrap().to_string();
         std::fs::write(&main_path, program_main).unwrap();
-        let clang_exit_code = std::process::Command::new("clang").args(&[&obj_path[..], &main_path[..], "-static", "-o", &dest_file[..]]).status().unwrap();
+        let clang_exit_code = std::process::Command::new("clang")
+            .args(&[&obj_path[..], &main_path[..], "-static", "-o", &dest_file[..]])
+            .status()
+            .unwrap();
         if !clang_exit_code.success() {
             std::process::exit(1);
         }

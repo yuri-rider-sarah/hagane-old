@@ -1,0 +1,6 @@
+let. x 1
+let. y 2
+set. y 3
+set. x (+ x y)
+set. y (+ x y)
+(print (+ x y))

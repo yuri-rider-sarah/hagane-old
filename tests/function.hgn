@@ -1,0 +1,5 @@
+let. f λ.(a b c d e) {
+    d
+} '(Int Int Int Int Int : Int)
+
+(print (f 1 2 3 4 5))
