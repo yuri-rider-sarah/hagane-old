@@ -1,0 +1,9 @@
+let. f λ.(x y) {
+    let. w (+ x y)
+    let. g λ.(x z) {
+        (+ x (+ y (+ z w)))
+    } '(Int Int : Int)
+    (g 1 5)
+} '(Int Int : Int)
+
+(print (f 2 6))

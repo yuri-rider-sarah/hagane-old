@@ -27,3 +27,5 @@ macro_rules! test {
 test!(print, "1");
 test!(variable, "11");
 test!(function, "4");
+test!(global_function, "9");
+test!(local_function, "20");

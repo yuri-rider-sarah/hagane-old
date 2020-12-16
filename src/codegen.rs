@@ -29,10 +29,26 @@ unsafe fn codegen_bool_constant_primitive(name: &str, n: u64, context: &mut Cont
     let c_name = CString::new(name).unwrap();
     let type_ = Type::Named("Bool".to_string());
     let val = LLVMConstInt(LLVMInt1Type(), n, 0);
-    let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&type_)?, c_name.as_ptr());
+    let ptr = LLVMBuildMalloc(context.builder, get_llvm_type(&type_)?, c_name.as_ptr());
     LLVMBuildStore(context.builder, val, ptr);
     context.names.push((name.to_string(), ptr, type_));
     Ok(())
+}
+
+unsafe fn function_value(func: LLVMValueRef, llvm_type: LLVMTypeRef, context: &mut Context) -> LLVMValueRef {
+    LLVMBuildInsertValue(
+        context.builder,
+        LLVMBuildInsertValue(
+            context.builder,
+            LLVMGetUndef(llvm_type),
+            func,
+            0,
+            &0,
+        ),
+        LLVMConstNull(LLVMPointerType(LLVMInt8Type(), 0)),
+        1,
+        &0,
+    )
 }
 
 unsafe fn codegen_binary_arith_primitive(name: &str, build: unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMValueRef, *const i8) -> LLVMValueRef, context: &mut Context) -> Result<()> {
@@ -44,8 +60,9 @@ unsafe fn codegen_binary_arith_primitive(name: &str, build: unsafe extern "C" fn
     LLVMBuildRet(context.builder, build(context.builder, LLVMGetParam(func, 0), LLVMGetParam(func, 1), &0));
     LLVMPositionBuilderAtEnd(context.builder, parent);
     let func_type = Type::Function(param_types, Box::new(ret_type));
-    let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&func_type)?, c_name.as_ptr());
-    LLVMBuildStore(context.builder, func, ptr);
+    let llvm_type = get_llvm_type(&func_type)?;
+    let ptr = LLVMBuildMalloc(context.builder, llvm_type, c_name.as_ptr());
+    LLVMBuildStore(context.builder, function_value(func, llvm_type, context), ptr);
     context.names.push((name.to_string(), ptr, func_type));
     Ok(())
 }
@@ -59,8 +76,9 @@ unsafe fn codegen_binary_cmp_primitive(name: &str, cmp: LLVMIntPredicate, contex
     LLVMBuildRet(context.builder, LLVMBuildICmp(context.builder, cmp, LLVMGetParam(func, 0), LLVMGetParam(func, 1), &0));
     LLVMPositionBuilderAtEnd(context.builder, parent);
     let func_type = Type::Function(param_types, Box::new(ret_type));
-    let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&func_type)?, c_name.as_ptr());
-    LLVMBuildStore(context.builder, func, ptr);
+    let llvm_type = get_llvm_type(&func_type)?;
+    let ptr = LLVMBuildMalloc(context.builder, llvm_type, c_name.as_ptr());
+    LLVMBuildStore(context.builder, function_value(func, llvm_type, context), ptr);
     context.names.push((name.to_string(), ptr, func_type));
     Ok(())
 }
@@ -92,8 +110,9 @@ unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
         LLVMBuildRet(context.builder, codegen_unit().0);
         LLVMPositionBuilderAtEnd(context.builder, parent);
         let func_type = Type::Function(param_types, Box::new(Type::Tuple(Vec::new())));
-        let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&func_type)?, &0);
-        LLVMBuildStore(context.builder, func, ptr);
+        let llvm_type = get_llvm_type(&func_type)?;
+        let ptr = LLVMBuildMalloc(context.builder, llvm_type, &0);
+        LLVMBuildStore(context.builder, function_value(func, llvm_type, context), ptr);
         context.names.push(("print".to_string(), ptr, func_type));
     }
     Ok(())
@@ -140,7 +159,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             (tuple, type_)
         },
         Call(func, args) => {
-            let (func_value, func_type) = codegen(func, context)?;
+            let (func_val, func_type) = codegen(func, context)?;
             let (mut arg_values, arg_types) = codegen_group(args, context)?;
             let ret_type = match func_type {
                 Type::Function(param_types, ret_type) => if param_types == arg_types {
@@ -150,8 +169,10 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 },
                 _ => return Err(Error::NotAFunction(func_type)),
             };
-            let c_name = CString::new("call").unwrap();
-            let call = LLVMBuildCall(context.builder, func_value, arg_values.as_mut_ptr(), args.len() as u32, c_name.as_ptr());
+            let func_ptr = LLVMBuildExtractValue(context.builder, func_val, 0, &0);
+            arg_values.push(LLVMBuildExtractValue(context.builder, func_val, 1, &0));
+            let call_c_name = CString::new("call").unwrap();
+            let call = LLVMBuildCall(context.builder, func_ptr, arg_values.as_mut_ptr(), arg_values.len() as u32, call_c_name.as_ptr());
             LLVMSetInstructionCallConv(call, LLVMCallConv::LLVMFastCallConv as u32);
             (call, ret_type)
         },
@@ -160,7 +181,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 let (value, type_) = codegen(expr, context)?;
                 check_type_compat(stated_type, &type_)?;
                 let c_name = CString::new(&name[..]).unwrap();
-                let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&type_)?, c_name.as_ptr());
+                let ptr = LLVMBuildMalloc(context.builder, get_llvm_type(&type_)?, c_name.as_ptr());
                 LLVMBuildStore(context.builder, value, ptr);
                 context.names.push((name.clone(), ptr, type_));
                 codegen_unit()
@@ -195,30 +216,76 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 },
                 _ => return Err(Error::NotAFunction(type_)),
             };
+            let mut captures_types = Vec::new();
+            for (_, _, type_) in &context.names {
+                captures_types.push(LLVMPointerType(get_llvm_type(type_)?, 0));
+            }
             let func = create_function(context, "lambda", param_types, ret_type)?;
-            let old_names_len = context.names.len();
+            let captures_type = LLVMStructType(
+                captures_types.as_mut_ptr(),
+                captures_types.len() as u32,
+                0,
+            );
+            let captures_c_name = CString::new("captures").unwrap();
+            let captures = LLVMBuildBitCast(
+                context.builder,
+                LLVMGetParam(func, expr_params.len() as u32),
+                LLVMPointerType(captures_type, 0),
+                captures_c_name.as_ptr(),
+            );
+            let mut inner_names: Vec<_> = context.names.iter().enumerate().map(|(i, (name, _, type_))| {
+                let c_name = CString::new(&name[..]).unwrap();
+                let mut indices = vec![LLVMConstInt(LLVMInt32Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
+                let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, c_name.as_ptr());
+                (name.clone(), LLVMBuildLoad(context.builder, ptr, c_name.as_ptr()), type_.clone())
+            }).collect();
             for (i, (Expr(name, stated_param_type), param_type)) in Iterator::zip(expr_params.iter(), param_types.iter()).enumerate() {
                 match name {
                     Ident(name) => {
                         check_type_compat(&stated_param_type, param_type)?;
                         let value = LLVMGetParam(func, i as u32);
                         let c_name = CString::new(&name[..]).unwrap();
-                        let ptr = LLVMBuildAlloca(context.builder, get_llvm_type(&param_type)?, c_name.as_ptr());
+                        let ptr = LLVMBuildMalloc(context.builder, get_llvm_type(&param_type)?, c_name.as_ptr());
                         LLVMBuildStore(context.builder, value, ptr);
                         LLVMSetValueName2(value, name.as_ptr() as *const i8, name.len());
-                        context.names.push((name.clone(), ptr, param_type.clone()));
+                        inner_names.push((name.clone(), ptr, param_type.clone()));
                     },
                     _ => return Err(Error::AssignToExpr),
                 }
             }
-            let (ret_val, inferred_ret_type) = codegen_block(body, context)?;
+            let (ret_val, inferred_ret_type) = codegen_block(body, &mut Context { names: inner_names, .. *context })?;
             LLVMBuildRet(context.builder, ret_val);
             if **ret_type != inferred_ret_type {
                 return Err(Error::ConflictingType(inferred_ret_type, *ret_type.clone()));
             }
-            context.names.truncate(old_names_len);
             LLVMPositionBuilderAtEnd(context.builder, parent);
-            (func, type_)
+            let captures = LLVMBuildMalloc(context.builder, captures_type, captures_c_name.as_ptr());
+            for (i, (name, val, _)) in context.names.iter().enumerate() {
+                let c_name = CString::new(&name[..]).unwrap();
+                let mut indices = vec![LLVMConstInt(LLVMInt32Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
+                let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, c_name.as_ptr());
+                LLVMBuildStore(context.builder, *val, ptr);
+            }
+            let func_c_name = CString::new("func").unwrap();
+            let func_val = LLVMBuildInsertValue(
+                context.builder,
+                LLVMBuildInsertValue(
+                    context.builder,
+                    LLVMGetUndef(get_llvm_type(&type_)?),
+                    func,
+                    0,
+                    func_c_name.as_ptr(),
+                ),
+                LLVMBuildBitCast(
+                    context.builder,
+                    captures,
+                    LLVMPointerType(LLVMInt8Type(), 0),
+                    captures_c_name.as_ptr(),
+                ),
+                1,
+                func_c_name.as_ptr(),
+            );
+            (func_val, type_)
         },
     };
     check_type_compat(stated_type, &inferred_type)?;
@@ -283,7 +350,17 @@ unsafe fn get_llvm_type(type_: &Type) -> Result<LLVMTypeRef> {
                 0,
             )
         },
-        Type::Function(params, ret) => LLVMPointerType(get_llvm_function_type(params, ret)?, 0),
+        Type::Function(params, ret) => {
+            let mut contents = [
+                LLVMPointerType(get_llvm_function_type(params, ret)?, 0),
+                LLVMPointerType(LLVMInt8Type(), 0),
+            ];
+            LLVMStructType(
+                contents.as_mut_ptr(),
+                contents.len() as u32,
+                0,
+            )
+        },
     })
 }
 
@@ -292,6 +369,7 @@ unsafe fn get_llvm_function_type(params: &Vec<Type>, ret: &Type) -> Result<LLVMT
     for type_ in params {
         llvm_types.push(get_llvm_type(type_)?);
     }
+    llvm_types.push(LLVMPointerType(LLVMInt8Type(), 0));
     Ok(LLVMFunctionType(
         get_llvm_type(ret)?,
         llvm_types.as_mut_ptr(),
