@@ -8,6 +8,9 @@ use llvm_sys::LLVMIntPredicate::*;
 use llvm_sys::prelude::*;
 use llvm_sys::core::*;
 
+const ENTRY_C_NAME: *const i8 = b"entry\0" as *const u8 as *const i8;
+const BB_C_NAME: *const i8 = b"bb\0" as *const u8 as *const i8;
+
 struct Context {
     module: LLVMModuleRef,
     builder: LLVMBuilderRef,
@@ -19,8 +22,7 @@ unsafe fn create_function(context: &mut Context, name: &str, param_types: &Vec<T
     let func = LLVMAddFunction(context.module, func_c_name.as_ptr(), get_llvm_function_type(param_types, ret_type)?);
     LLVMSetLinkage(func, LLVMLinkage::LLVMPrivateLinkage);
     LLVMSetFunctionCallConv(func, LLVMCallConv::LLVMFastCallConv as u32);
-    let entry_c_name = CString::new("entry").unwrap();
-    let entry = LLVMAppendBasicBlock(func, entry_c_name.as_ptr());
+    let entry = LLVMAppendBasicBlock(func, ENTRY_C_NAME);
     LLVMPositionBuilderAtEnd(context.builder, entry);
     Ok(func)
 }
@@ -119,13 +121,12 @@ unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
 }
 
 pub unsafe fn codegen_top(exprs: &Vec<Expr>) -> Result<LLVMModuleRef> {
-    let c_name = CString::new("module").unwrap();
-    let module = LLVMModuleCreateWithName(c_name.as_ptr());
+    let module_c_name = CString::new("module").unwrap();
+    let module = LLVMModuleCreateWithName(module_c_name.as_ptr());
     let main_func_type = LLVMFunctionType(LLVMVoidType(), std::ptr::null_mut(), 0, 0);
     let func_c_name = CString::new("hagane_main").unwrap();
     let func = LLVMAddFunction(module, func_c_name.as_ptr(), main_func_type);
-    let entry_c_name = CString::new("entry").unwrap();
-    let entry = LLVMAppendBasicBlock(func, entry_c_name.as_ptr());
+    let entry = LLVMAppendBasicBlock(func, ENTRY_C_NAME);
     let builder = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(builder, entry);
     let mut context = Context { module, builder, names: Vec::new() };
@@ -143,8 +144,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
         IntLiteral(n) => (LLVMConstInt(LLVMInt64Type(), *n as u64, 0), Type::Named("Int".to_string())),
         Ident(name) => {
             let (ptr, type_) = resolve_name(&context.names, name)?;
-            let c_name = CString::new(&name[..]).unwrap();
-            (LLVMBuildLoad(context.builder, ptr, c_name.as_ptr()), type_)
+            (LLVMBuildLoad(context.builder, ptr, &0), type_)
         },
         Tuple(exprs) => {
             let (values, types) = codegen_group(exprs, context)?;
@@ -152,8 +152,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let llvm_type = get_llvm_type(&type_)?;
             let mut tuple = LLVMGetUndef(llvm_type);
             for (i, &element) in values.iter().enumerate() {
-                let c_name = CString::new("tuple").unwrap();
-                tuple = LLVMBuildInsertValue(context.builder, tuple, element, i as u32, c_name.as_ptr());
+                tuple = LLVMBuildInsertValue(context.builder, tuple, element, i as u32, &0);
             }
             (tuple, type_)
         },
@@ -170,8 +169,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             };
             let func_ptr = LLVMBuildExtractValue(context.builder, func_val, 0, &0);
             arg_values.push(LLVMBuildExtractValue(context.builder, func_val, 1, &0));
-            let call_c_name = CString::new("call").unwrap();
-            let call = LLVMBuildCall(context.builder, func_ptr, arg_values.as_mut_ptr(), arg_values.len() as u32, call_c_name.as_ptr());
+            let call = LLVMBuildCall(context.builder, func_ptr, arg_values.as_mut_ptr(), arg_values.len() as u32, &0);
             LLVMSetInstructionCallConv(call, LLVMCallConv::LLVMFastCallConv as u32);
             (call, ret_type)
         },
@@ -208,11 +206,11 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             }
             let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
             let parent_block = LLVMGetInsertBlock(context.builder);
-            let then_block = LLVMAppendBasicBlock(function, &0);
+            let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, then_block);
             let (mut then_val, then_type) = codegen(then, context)?;
             let mut then_end = LLVMGetInsertBlock(context.builder);
-            let else_block = LLVMAppendBasicBlock(function, &0);
+            let else_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, else_block);
             let (mut else_val, else_type) = codegen(else_, context)?;
             let mut else_end = LLVMGetInsertBlock(context.builder);
@@ -221,7 +219,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             }
             LLVMPositionBuilderAtEnd(context.builder, parent_block);
             LLVMBuildCondBr(context.builder, cond_val, then_block, else_block);
-            let merge_block = LLVMAppendBasicBlock(function, &0);
+            let merge_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, then_end);
             LLVMBuildBr(context.builder, merge_block);
             LLVMPositionBuilderAtEnd(context.builder, else_end);
@@ -256,12 +254,11 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 captures_types.len() as u32,
                 0,
             );
-            let captures_c_name = CString::new("captures").unwrap();
             let captures = LLVMBuildBitCast(
                 context.builder,
                 LLVMGetParam(func, expr_params.len() as u32),
                 LLVMPointerType(captures_type, 0),
-                captures_c_name.as_ptr(),
+                &0,
             );
             let mut inner_names: Vec<_> = context.names.iter().enumerate().map(|(i, (name, _, type_))| {
                 let c_name = CString::new(&name[..]).unwrap();
@@ -289,14 +286,12 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 return Err(Error::ConflictingType(inferred_ret_type, *ret_type.clone()));
             }
             LLVMPositionBuilderAtEnd(context.builder, parent);
-            let captures = LLVMBuildMalloc(context.builder, captures_type, captures_c_name.as_ptr());
-            for (i, (name, val, _)) in context.names.iter().enumerate() {
-                let c_name = CString::new(&name[..]).unwrap();
+            let captures = LLVMBuildMalloc(context.builder, captures_type, &0);
+            for (i, (_, val, _)) in context.names.iter().enumerate() {
                 let mut indices = vec![LLVMConstInt(LLVMInt32Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
-                let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, c_name.as_ptr());
+                let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, &0);
                 LLVMBuildStore(context.builder, *val, ptr);
             }
-            let func_c_name = CString::new("func").unwrap();
             let func_val = LLVMBuildInsertValue(
                 context.builder,
                 LLVMBuildInsertValue(
@@ -304,16 +299,16 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                     LLVMGetUndef(get_llvm_type(&type_)?),
                     func,
                     0,
-                    func_c_name.as_ptr(),
+                    &0,
                 ),
                 LLVMBuildBitCast(
                     context.builder,
                     captures,
                     LLVMPointerType(LLVMInt8Type(), 0),
-                    captures_c_name.as_ptr(),
+                    &0,
                 ),
                 1,
-                func_c_name.as_ptr(),
+                &0,
             );
             (func_val, type_)
         },
