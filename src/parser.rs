@@ -10,6 +10,7 @@ pub enum UExpr {
     Let(Box<Expr>, Box<Expr>),
     Set(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<(Expr, Vec<Expr>)>),
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
     While(Box<Expr>, Vec<Expr>),
     Do(Vec<Expr>),
     Lambda(Vec<Expr>, Vec<Expr>),
@@ -51,6 +52,27 @@ pub fn read_expr(tokens: &mut Vec<Token>) -> Result<Expr> {
             UExpr::Match(Box::new(read_expr(tokens)?), read_match_body(tokens)?),
             None,
         ),
+        Token::If => {
+            let cond = read_expr(tokens)?;
+            let then_token = read_token(tokens)?;
+            if then_token != Token::Then {
+                return Err(Error::UnexpectedToken(Some(then_token)));
+            }
+            let then = read_block(tokens)?;
+            let else_token = read_token(tokens)?;
+            if else_token != Token::Else {
+                return Err(Error::UnexpectedToken(Some(else_token)));
+            }
+            let else_ = read_block(tokens)?;
+            Expr(
+                UExpr::If(
+                    Box::new(cond),
+                    Box::new(Expr(UExpr::Do(then), None)),
+                    Box::new(Expr(UExpr::Do(else_), None)),
+                ),
+                read_type_signature(tokens)?,
+            )
+        },
         Token::While => Expr(
             UExpr::While(Box::new(read_expr(tokens)?), read_block(tokens)?),
             None,

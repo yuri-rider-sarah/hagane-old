@@ -29,3 +29,6 @@ test!(variable, "11");
 test!(function, "4");
 test!(global_function, "9");
 test!(local_function, "20");
+test!(capture_mut, "1\n2");
+test!(if_, "1\n0");
+test!(if_nested, "1");

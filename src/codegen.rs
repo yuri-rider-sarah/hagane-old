@@ -134,7 +134,6 @@ pub unsafe fn codegen_top(exprs: &Vec<Expr>) -> Result<LLVMModuleRef> {
     if ret_type != Type::Tuple(Vec::new()) {
         return Err(Error::ConflictingType(ret_type, Type::Tuple(Vec::new())));
     }
-    LLVMPositionBuilderAtEnd(builder, entry);
     LLVMBuildRetVoid(builder);
     Ok(module)
 }
@@ -202,6 +201,37 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             _ => return Err(Error::AssignToExpr),
         },
         Match(_expr, _branches) => return Err(Error::Unimplemented),
+        If(cond, then, else_) => {
+            let (cond_val, cond_type) = codegen(cond, context)?;
+            if cond_type != Type::Named("Bool".to_string()) {
+                return Err(Error::ConflictingType(cond_type, Type::Named("Bool".to_string())));
+            }
+            let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
+            let parent_block = LLVMGetInsertBlock(context.builder);
+            let then_block = LLVMAppendBasicBlock(function, &0);
+            LLVMPositionBuilderAtEnd(context.builder, then_block);
+            let (mut then_val, then_type) = codegen(then, context)?;
+            let mut then_end = LLVMGetInsertBlock(context.builder);
+            let else_block = LLVMAppendBasicBlock(function, &0);
+            LLVMPositionBuilderAtEnd(context.builder, else_block);
+            let (mut else_val, else_type) = codegen(else_, context)?;
+            let mut else_end = LLVMGetInsertBlock(context.builder);
+            if then_type != else_type {
+                return Err(Error::ConflictingType(then_type, else_type));
+            }
+            LLVMPositionBuilderAtEnd(context.builder, parent_block);
+            LLVMBuildCondBr(context.builder, cond_val, then_block, else_block);
+            let merge_block = LLVMAppendBasicBlock(function, &0);
+            LLVMPositionBuilderAtEnd(context.builder, then_end);
+            LLVMBuildBr(context.builder, merge_block);
+            LLVMPositionBuilderAtEnd(context.builder, else_end);
+            LLVMBuildBr(context.builder, merge_block);
+            LLVMPositionBuilderAtEnd(context.builder, merge_block);
+            let phi = LLVMBuildPhi(context.builder, get_llvm_type(&then_type)?, &0);
+            LLVMAddIncoming(phi, &mut then_val, &mut then_end, 1);
+            LLVMAddIncoming(phi, &mut else_val, &mut else_end, 1);
+            (phi, then_type)
+        },
         While(_expr, _body) => return Err(Error::Unimplemented),
         Do(body) => codegen_block(body, context)?,
         Lambda(expr_params, body) => {
