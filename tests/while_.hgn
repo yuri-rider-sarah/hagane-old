@@ -1,0 +1,8 @@
+let. x 1000
+let. y 200
+while. (> x 0) {
+    set. x (- x 1)
+    set. y (+ y 1)
+}
+(print x)
+(print y)

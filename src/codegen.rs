@@ -208,11 +208,11 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let parent_block = LLVMGetInsertBlock(context.builder);
             let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, then_block);
-            let (mut then_val, then_type) = codegen(then, context)?;
+            let (mut then_val, then_type) = codegen_block(then, context)?;
             let mut then_end = LLVMGetInsertBlock(context.builder);
             let else_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, else_block);
-            let (mut else_val, else_type) = codegen(else_, context)?;
+            let (mut else_val, else_type) = codegen_block(else_, context)?;
             let mut else_end = LLVMGetInsertBlock(context.builder);
             if then_type != else_type {
                 return Err(Error::ConflictingType(then_type, else_type));
@@ -230,7 +230,25 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             LLVMAddIncoming(phi, &mut else_val, &mut else_end, 1);
             (phi, then_type)
         },
-        While(_expr, _body) => return Err(Error::Unimplemented),
+        While(cond, body) => {
+            let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
+            let cond_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+            LLVMBuildBr(context.builder, cond_block);
+            LLVMPositionBuilderAtEnd(context.builder, cond_block);
+            let (cond_val, cond_type) = codegen(cond, context)?;
+            if cond_type != Type::Named("Bool".to_string()) {
+                return Err(Error::ConflictingType(cond_type, Type::Named("Bool".to_string())));
+            }
+            let body_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+            LLVMPositionBuilderAtEnd(context.builder, body_block);
+            let _ = codegen_block(body, context)?;
+            LLVMBuildBr(context.builder, cond_block);
+            LLVMPositionBuilderAtEnd(context.builder, cond_block);
+            let merge_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+            LLVMBuildCondBr(context.builder, cond_val, body_block, merge_block);
+            LLVMPositionBuilderAtEnd(context.builder, merge_block);
+            codegen_unit()
+        },
         Do(body) => codegen_block(body, context)?,
         Lambda(expr_params, body) => {
             let parent = LLVMGetInsertBlock(context.builder);

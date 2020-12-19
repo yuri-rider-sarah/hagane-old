@@ -32,3 +32,6 @@ test!(local_function, "20");
 test!(capture_mut, "1\n2");
 test!(if_, "1\n0");
 test!(if_nested, "1");
+test!(while_, "0\n1200");
+test!(fib, "7540113804746346429");
+test!(while_nested, "3025");

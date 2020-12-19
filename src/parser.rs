@@ -10,7 +10,7 @@ pub enum UExpr {
     Let(Box<Expr>, Box<Expr>),
     Set(Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<(Expr, Vec<Expr>)>),
-    If(Box<Expr>, Box<Expr>, Box<Expr>),
+    If(Box<Expr>, Vec<Expr>, Vec<Expr>),
     While(Box<Expr>, Vec<Expr>),
     Do(Vec<Expr>),
     Lambda(Vec<Expr>, Vec<Expr>),
@@ -65,11 +65,7 @@ pub fn read_expr(tokens: &mut Vec<Token>) -> Result<Expr> {
             }
             let else_ = read_block(tokens)?;
             Expr(
-                UExpr::If(
-                    Box::new(cond),
-                    Box::new(Expr(UExpr::Do(then), None)),
-                    Box::new(Expr(UExpr::Do(else_), None)),
-                ),
+                UExpr::If(Box::new(cond), then, else_),
                 read_type_signature(tokens)?,
             )
         },
