@@ -9,10 +9,40 @@ use llvm_sys::analysis::*;
 use llvm_sys::core::*;
 use llvm_sys::target::*;
 use llvm_sys::target_machine::*;
+use llvm_sys::transforms::pass_manager_builder::*;
 
 fn main() {
-    let src_file = std::env::args().nth(1).unwrap();
-    let dest_file = std::env::args().nth(2).unwrap_or(src_file.clone() + ".out");
+    let mut main_args = Vec::new();
+    let mut print_ir_unopt = false;
+    let mut print_ir = false;
+    let mut opt_level = 0;
+    let inline_threshold = 225;
+    for arg in std::env::args().skip(1) {
+        if arg.starts_with("-") {
+            match &arg[1..] {
+                "O0" => opt_level = 0,
+                "O1" => opt_level = 1,
+                "O2" => opt_level = 2,
+                "O3" => opt_level = 3,
+                "print-ir-unopt" => print_ir_unopt = true,
+                "print-ir" => print_ir = true,
+                _ => {
+                    eprintln!("Invalid argument: {}", arg);
+                    std::process::exit(1);
+                },
+            }
+        } else {
+            main_args.push(arg);
+        }
+    }
+    let (src_file, dest_file) = match &main_args[..] {
+        [src] => (src.clone(), src.clone() + ".out"),
+        [src, dest] => (src.clone(), dest.clone()),
+        _ => {
+            eprintln!("Invalid arguments");
+            std::process::exit(1);
+        },
+    };
     let mut chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
     chars.reverse();
     let mut tokens = lexer::read_file_tokens(chars).unwrap();
@@ -53,9 +83,25 @@ fn main() {
         LLVMSetModuleDataLayout(module, LLVMCreateTargetDataLayout(target_machine));
         LLVMSetTarget(module, target_triple);
         if LLVMVerifyModule(module, LLVMVerifierFailureAction::LLVMPrintMessageAction, std::ptr::null_mut()) != 0 {
-            eprintln!("Module:");
+            eprintln!("=== Unoptimized LLVM IR ===");
             eprintln!("{}", std::ffi::CStr::from_ptr(LLVMPrintModuleToString(module)).to_string_lossy());
             std::process::exit(1);
+        }
+        if opt_level > 0 {
+            if print_ir_unopt {
+                eprintln!("=== Unoptimized LLVM IR ===");
+                eprintln!("{}", std::ffi::CStr::from_ptr(LLVMPrintModuleToString(module)).to_string_lossy());
+            }
+            let pass_manager = LLVMCreatePassManager();
+            let pass_manager_builder = LLVMPassManagerBuilderCreate();
+            LLVMPassManagerBuilderSetOptLevel(pass_manager_builder, opt_level);
+            LLVMPassManagerBuilderUseInlinerWithThreshold(pass_manager_builder, inline_threshold);
+            LLVMPassManagerBuilderPopulateModulePassManager(pass_manager_builder, pass_manager);
+            LLVMRunPassManager(pass_manager, module);
+        }
+        if print_ir {
+            eprintln!("=== Optimized LLVM IR ===");
+            eprintln!("{}", std::ffi::CStr::from_ptr(LLVMPrintModuleToString(module)).to_string_lossy());
         }
         let temp_dir = tempfile::tempdir().unwrap();
         let obj_path = temp_dir.path().clone().join(std::path::Path::new("object.o")).to_str().unwrap().to_string();
