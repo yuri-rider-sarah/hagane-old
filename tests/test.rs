@@ -1,3 +1,13 @@
+struct Deleter {
+    file: &'static str,
+}
+
+impl Drop for Deleter {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.file);
+    }
+}
+
 #[cfg(debug_assertions)]
 const COMPILER_PATH: &'static str = "target/debug/hagane";
 #[cfg(not(debug_assertions))]
@@ -7,6 +17,7 @@ macro_rules! test {
     ( $name:ident , $output:expr ) => {
         #[test]
         fn $name() {
+            let _deleter = Deleter { file: concat!("tests/", stringify!($name), ".hgn.out") };
             let compiler_out = std::process::Command::new(COMPILER_PATH)
                 .arg(concat!("tests/", stringify!($name), ".hgn"))
                 .stderr(std::process::Stdio::inherit())
