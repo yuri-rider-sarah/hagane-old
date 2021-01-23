@@ -45,10 +45,11 @@ fn main() {
     };
     let mut chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
     chars.reverse();
-    let mut tokens = lexer::read_file_tokens(chars).unwrap();
+    let mut tokens = lexer::Tokens::new(chars);
     let mut exprs = Vec::new();
-    while tokens.len() != 0 {
-        exprs.push(parser::read_expr(&mut tokens).unwrap());
+    while let Some(t) = lexer::read_token_or_eof(&mut tokens).unwrap() {
+        lexer::return_token(&mut tokens, t);
+        exprs.push(parser::read_block_expr(&mut tokens).unwrap());
     }
     unsafe {
         LLVM_InitializeAllTargetInfos();

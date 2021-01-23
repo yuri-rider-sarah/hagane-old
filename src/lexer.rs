@@ -6,21 +6,16 @@ use unic_ucd_common::is_white_space;
 pub enum Token {
     IntLiteral(i64),
     Ident(String),
-    Let,
-    Set,
-    Match,
-    If,
-    Then,
-    Else,
-    While,
-    Do,
-    Lambda,
+    PriKeyword(String),
+    SecKeyword(String),
     LParen,
     RParen,
     LBracket,
     RBracket,
     LBrace,
     RBrace,
+    LIndent,
+    RIndent,
     Apostrophe,
     Colon,
     Hash,
@@ -63,14 +58,33 @@ fn is_starting_ident_character(c: char) -> bool {
     }
 }
 
-fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
+pub struct Tokens {
+    chars: Vec<char>,
+    indents: Vec<u64>,
+    buffer: Vec<Token>,
+}
+
+impl Tokens {
+    pub fn new(chars: Vec<char>) -> Tokens {
+        Tokens {
+            chars,
+            indents: Vec::new(),
+            buffer: Vec::new(),
+        }
+    }
+}
+
+fn read_token_(tokens: &mut Tokens, or_indent: bool) -> Result<Option<Token>> {
     use Token::*;
-    let mut c = chars.pop();
+    if let Some(t) = tokens.buffer.pop() {
+        return Ok(Some(t));
+    }
+    let mut c = tokens.chars.pop();
     while let Some(c0) = c {
         if !is_white_space(c0) {
             break;
         }
-        c = chars.pop();
+        c = tokens.chars.pop();
     }
     let c0 = match c {
         Some(c0) => c0,
@@ -93,10 +107,10 @@ fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
                     break;
                 }
                 n = 10 * n + (c0 as i64 - '0' as i64);
-                c = chars.pop();
+                c = tokens.chars.pop();
             }
             if let Some(c0) = c {
-                chars.push(c0);
+                tokens.chars.push(c0);
             }
             if c.map_or(false, |c| !(is_white_space(c) || AFTER_IDENT_CHARS.contains(&c))) {
                 return Err(Error::UnexpectedChar(c));
@@ -110,24 +124,15 @@ fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
                     break;
                 }
                 s.push(c0);
-                c = chars.pop();
+                c = tokens.chars.pop();
             }
             if c == Some('.') {
-                match &s[..] {
-                    "let" => Let,
-                    "set" => Set,
-                    "match" => Match,
-                    "if" => If,
-                    "then" => Then,
-                    "else" => Else,
-                    "while" => While,
-                    "do" => Do,
-                    "λ" => Lambda,
-                    _ => return Err(Error::InvalidKeyword(s)),
-                }
+                PriKeyword(s)
+            } else if c == Some(',') {
+                SecKeyword(s)
             } else {
                 if let Some(c0) = c {
-                    chars.push(c0);
+                    tokens.chars.push(c0);
                     if !(is_white_space(c0) || AFTER_IDENT_CHARS.contains(&c0)) {
                         return Err(Error::UnexpectedChar(c));
                     }
@@ -139,11 +144,22 @@ fn read_token(chars: &mut Vec<char>) -> Result<Option<Token>> {
     }))
 }
 
-pub fn read_file_tokens(mut chars: Vec<char>) -> Result<Vec<Token>> {
-    let mut v = Vec::new();
-    while let Some(t) = read_token(&mut chars)? {
-        v.push(t);
-    }
-    v.reverse();
-    Ok(v)
+pub fn read_token_or_eof(tokens: &mut Tokens) -> Result<Option<Token>> {
+    read_token_(tokens, false)
+}
+
+pub fn read_token_or_indent_or_eof(tokens: &mut Tokens) -> Result<Option<Token>> {
+    read_token_(tokens, true)
+}
+
+pub fn read_token(tokens: &mut Tokens) -> Result<Token> {
+    read_token_(tokens, false)?.ok_or(Error::UnexpectedToken(None))
+}
+
+pub fn read_token_or_indent(tokens: &mut Tokens) -> Result<Token> {
+    read_token_(tokens, true)?.ok_or(Error::UnexpectedToken(None))
+}
+
+pub fn return_token(tokens: &mut Tokens, token: Token) {
+    tokens.buffer.push(token)
 }

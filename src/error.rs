@@ -5,7 +5,7 @@ use crate::parser::Type;
 pub enum Error {
     UnexpectedChar(Option<char>),
     UnexpectedToken(Option<Token>),
-    InvalidKeyword(String),
+    InvalidExpr,
     UnboundVariable(String),
     UnboundType(String),
     ConflictingType(Type, Type),

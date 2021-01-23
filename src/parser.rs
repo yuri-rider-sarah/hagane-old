@@ -1,7 +1,7 @@
 use crate::error::*;
-use crate::lexer::Token;
+use crate::lexer::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum UExpr {
     IntLiteral(i64),
     Ident(String),
@@ -9,14 +9,13 @@ pub enum UExpr {
     Call(Box<Expr>, Vec<Expr>),
     Let(Box<Expr>, Box<Expr>),
     Set(Box<Expr>, Box<Expr>),
-    Match(Box<Expr>, Vec<(Expr, Vec<Expr>)>),
-    If(Box<Expr>, Vec<Expr>, Vec<Expr>),
-    While(Box<Expr>, Vec<Expr>),
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
+    While(Box<Expr>, Box<Expr>),
     Do(Vec<Expr>),
-    Lambda(Vec<Expr>, Vec<Expr>),
+    Lambda(Vec<Expr>, Box<Expr>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Expr(pub UExpr, pub Option<Type>);
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,87 +25,124 @@ pub enum Type {
     Function(Vec<Type>, Box<Type>),
 }
 
-fn read_token(tokens: &mut Vec<Token>) -> Result<Token> {
-    tokens.pop().ok_or(Error::UnexpectedToken(None))
-}
-
-pub fn read_expr(tokens: &mut Vec<Token>) -> Result<Expr> {
-    Ok(match read_token(tokens)? {
-        Token::IntLiteral(n) => Expr(
-            UExpr::IntLiteral(n),
-            read_type_signature(tokens)?,
-        ),
-        Token::Ident(n) => Expr(
-            UExpr::Ident(n),
-            read_type_signature(tokens)?,
-        ),
-        Token::Let => Expr(
-            UExpr::Let(Box::new(read_expr(tokens)?), Box::new(read_expr(tokens)?)),
-            None,
-        ),
-        Token::Set => Expr(
-            UExpr::Set(Box::new(read_expr(tokens)?), Box::new(read_expr(tokens)?)),
-            None,
-        ),
-        Token::Match => Expr(
-            UExpr::Match(Box::new(read_expr(tokens)?), read_match_body(tokens)?),
-            None,
-        ),
-        Token::If => {
-            let cond = read_expr(tokens)?;
-            let then_token = read_token(tokens)?;
-            if then_token != Token::Then {
-                return Err(Error::UnexpectedToken(Some(then_token)));
-            }
-            let then = read_block(tokens)?;
-            let else_token = read_token(tokens)?;
-            if else_token != Token::Else {
-                return Err(Error::UnexpectedToken(Some(else_token)));
-            }
-            let else_ = read_block(tokens)?;
-            Expr(
-                UExpr::If(Box::new(cond), then, else_),
+fn read_expr(tokens: &mut Tokens) -> Result<Expr> {
+    let mut expr = read_simple_expr(tokens)?;
+    loop {
+        match read_token_or_eof(tokens)? {
+            Some(Token::LParen) => expr = Expr(
+                UExpr::Call(Box::new(expr), read_arg_list_r(tokens)?),
                 read_type_signature(tokens)?,
-            )
-        },
-        Token::While => Expr(
-            UExpr::While(Box::new(read_expr(tokens)?), read_block(tokens)?),
-            None,
-        ),
-        Token::Do => Expr(
-            UExpr::Do(read_block(tokens)?),
-            None,
-        ),
-        Token::LParen => Expr(
-            UExpr::Call(Box::new(read_expr(tokens)?), read_arg_list_r(tokens)?),
-            read_type_signature(tokens)?,
-        ),
-        Token::Lambda => Expr(
-            UExpr::Lambda(read_arg_list(tokens)?, read_block(tokens)?),
-            read_type_signature(tokens)?,
-        ),
-        Token::Hash => Expr(
-            UExpr::Tuple(read_arg_list(tokens)?),
-            read_type_signature(tokens)?,
-        ),
-        t => return Err(Error::UnexpectedToken(Some(t))),
-    })
+            ),
+            t => {
+                if let Some(t) = t {
+                    return_token(tokens, t);
+                }
+                return Ok(expr);
+            },
+        }
+    }
 }
 
-fn read_match_branch(tokens: &mut Vec<Token>) -> Result<(Expr, Vec<Expr>)> {
-    let pattern = read_expr(tokens)?;
-    let middle = read_token(tokens)?;
-    if middle != Token::Colon {
-        return Err(Error::UnexpectedToken(Some(middle)));
-    }
-    let body = read_block(tokens)?;
-    Ok((pattern, body))
+enum Clause {
+    SecKeyword(String),
+    Block(Vec<Expr>),
+}
+
+fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
+    let uexpr = match read_token(tokens)? {
+        Token::IntLiteral(n) => UExpr::IntLiteral(n),
+        Token::Ident(n) => UExpr::Ident(n),
+        Token::Hash => UExpr::Tuple(read_arg_list(tokens)?),
+        Token::PriKeyword(keyword) => {
+            let t = read_token(tokens)?;
+            if t != Token::LParen {
+                return Err(Error::UnexpectedToken(Some(t)));
+            }
+            let mut clauses = Vec::new();
+            loop {
+                match read_token_or_indent(tokens)? {
+                    Token::SecKeyword(keyword) => clauses.push(Clause::SecKeyword(keyword)),
+                    Token::LBrace => clauses.push(Clause::Block(read_block_brace_r(tokens)?)),
+                    Token::LIndent => clauses.push(Clause::Block(read_block_indent_r(tokens)?)),
+                    Token::RParen => break,
+                    t => {
+                        return_token(tokens, t);
+                        clauses.push(Clause::Block(vec![read_expr(tokens)?]));
+                    },
+                }
+            }
+            use Clause::*;
+            match &keyword[..] {
+                "let" => match &clauses[..] {
+                    [Block(var), Block(val)] => match &var[..] {
+                        [var] => UExpr::Let(Box::new(var.clone()), Box::new(Expr(UExpr::Do(val.clone()), None))),
+                        _ => return Err(Error::InvalidExpr),
+                    },
+                    _ => return Err(Error::InvalidExpr),
+                },
+                "set" => match &clauses[..] {
+                    [Block(var), Block(val)] => match &var[..] {
+                        [var] => UExpr::Set(Box::new(var.clone()), Box::new(Expr(UExpr::Do(val.clone()), None))),
+                        _ => return Err(Error::InvalidExpr),
+                    },
+                    _ => return Err(Error::InvalidExpr),
+                },
+                "do" => match &clauses[..] {
+                    [Block(exprs)] => UExpr::Do(exprs.clone()),
+                    _ => return Err(Error::InvalidExpr),
+                },
+                "if" => {
+                    let (cond, then, else_) = match &clauses[..] {
+                        [Block(cond), Block(then), Block(else_)] => (cond, then, else_),
+                        [Block(cond), SecKeyword(then_kw), Block(then), Block(else_)]
+                            if then_kw == "then" => (cond, then, else_),
+                        [Block(cond), Block(then), SecKeyword(else_kw), Block(else_)]
+                            if else_kw == "else"=> (cond, then, else_),
+                        [Block(cond), SecKeyword(then_kw), Block(then), SecKeyword(else_kw), Block(else_)]
+                            if then_kw == "then" && else_kw == "else" => (cond, then, else_),
+                        _ => return Err(Error::InvalidExpr),
+                    };
+                    UExpr::If(
+                        Box::new(Expr(UExpr::Do(cond.clone()), None)),
+                        Box::new(Expr(UExpr::Do(then.clone()), None)),
+                        Box::new(Expr(UExpr::Do(else_.clone()), None)),
+                    )
+                },
+                "while" => {
+                    let (cond, body) = match &clauses[..] {
+                        [Block(cond), Block(body)] => (cond, body),
+                        [Block(cond), SecKeyword(do_kw), Block(body)] if do_kw == "do" => (cond, body),
+                        _ => return Err(Error::InvalidExpr),
+                    };
+                    UExpr::While(
+                        Box::new(Expr(UExpr::Do(cond.clone()), None)),
+                        Box::new(Expr(UExpr::Do(body.clone()), None)),
+                    )
+                },
+                "λ" => {
+                    let (args, body) = match &clauses[..] {
+                        [Block(args), Block(body)] => (args, body),
+                        [Block(args), SecKeyword(arrow_kw), Block(body)] if arrow_kw == "⇒" => (args, body),
+                        _ => return Err(Error::InvalidExpr),
+                    };
+                    UExpr::Lambda(args.clone(), Box::new(Expr(UExpr::Do(body.clone()), None)))
+                },
+                _ => return Err(Error::InvalidExpr),
+            }
+        },
+        t => return Err(Error::UnexpectedToken(Some(t))),
+    };
+    Ok(Expr(uexpr, read_type_signature(tokens)?))
+}
+
+pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
+    read_expr(tokens)
 }
 
 fn read_bracketed_list_r<T>(
-    tokens: &mut Vec<Token>,
+    tokens: &mut Tokens,
     is_right: fn(&Token) -> bool,
-    read_element: fn(&mut Vec<Token>,
+    read_element: fn(&mut Tokens,
 ) -> Result<T>) -> Result<Vec<T>> {
     let mut v = Vec::new();
     loop {
@@ -114,17 +150,17 @@ fn read_bracketed_list_r<T>(
         if is_right(&t) {
             return Ok(v);
         } else {
-            tokens.push(t);
+            return_token(tokens, t);
             v.push(read_element(tokens)?);
         }
     }
 }
 
 fn read_bracketed_list<T>(
-    tokens: &mut Vec<Token>,
+    tokens: &mut Tokens,
     is_left: fn(&Token) -> bool,
     is_right: fn(&Token) -> bool,
-    read_element: fn(&mut Vec<Token>,
+    read_element: fn(&mut Tokens,
 ) -> Result<T>) -> Result<Vec<T>> {
     let t = read_token(tokens)?;
     if !is_left(&t) {
@@ -133,33 +169,37 @@ fn read_bracketed_list<T>(
     read_bracketed_list_r(tokens, is_right, read_element)
 }
 
-fn read_block(tokens: &mut Vec<Token>) -> Result<Vec<Expr>> {
-    read_bracketed_list(tokens, |t| *t == Token::LBrace, |t| *t == Token::RBrace, read_expr)
+fn read_block_brace_r(tokens: &mut Tokens) -> Result<Vec<Expr>> {
+    read_bracketed_list_r(tokens, |t| *t == Token::RBrace, read_expr)
 }
 
-fn read_match_body(tokens: &mut Vec<Token>) -> Result<Vec<(Expr, Vec<Expr>)>> {
-    read_bracketed_list(tokens, |t| *t == Token::LBrace, |t| *t == Token::RBrace, read_match_branch)
+fn read_block_indent_r(tokens: &mut Tokens) -> Result<Vec<Expr>> {
+    read_bracketed_list_r(tokens, |t| *t == Token::RIndent, read_block_expr)
 }
 
-fn read_arg_list(tokens: &mut Vec<Token>) -> Result<Vec<Expr>> {
+fn read_arg_list(tokens: &mut Tokens) -> Result<Vec<Expr>> {
     read_bracketed_list(tokens, |t| *t == Token::LParen, |t| *t == Token::RParen, read_expr)
 }
 
-fn read_arg_list_r(tokens: &mut Vec<Token>) -> Result<Vec<Expr>> {
+fn read_arg_list_r(tokens: &mut Tokens) -> Result<Vec<Expr>> {
     read_bracketed_list_r(tokens, |t| *t == Token::RParen, read_expr)
 }
 
-fn read_type_signature(tokens: &mut Vec<Token>) -> Result<Option<Type>> {
-    Ok(match tokens.last() {
+fn read_type_signature(tokens: &mut Tokens) -> Result<Option<Type>> {
+    Ok(match read_token_or_eof(tokens)? {
         Some(Token::Apostrophe) => {
-            let _ = read_token(tokens)?;
             Some(read_type(tokens)?)
         },
-        _ => None,
+        t => {
+            if let Some(t) = t {
+                return_token(tokens, t);
+            }
+            None
+        },
     })
 }
 
-fn read_type(tokens: &mut Vec<Token>) -> Result<Type> {
+fn read_type(tokens: &mut Tokens) -> Result<Type> {
     Ok(match read_token(tokens)? {
         Token::Ident(name) => Type::Named(name),
         Token::Hash => Type::Tuple(read_func_type_param_list(tokens)?),
@@ -176,10 +216,10 @@ fn read_type(tokens: &mut Vec<Token>) -> Result<Type> {
     })
 }
 
-fn read_func_type_param_list(tokens: &mut Vec<Token>) -> Result<Vec<Type>> {
+fn read_func_type_param_list(tokens: &mut Tokens) -> Result<Vec<Type>> {
     read_bracketed_list(tokens, |t| *t == Token::LParen, |t| *t == Token::RParen, read_type)
 }
 
-fn read_func_type_param_list_rc(tokens: &mut Vec<Token>) -> Result<Vec<Type>> {
+fn read_func_type_param_list_rc(tokens: &mut Tokens) -> Result<Vec<Type>> {
     read_bracketed_list_r(tokens, |t| *t == Token::Colon, read_type)
 }

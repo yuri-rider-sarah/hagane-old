@@ -198,7 +198,6 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             },
             _ => return Err(Error::AssignToExpr),
         },
-        Match(_expr, _branches) => return Err(Error::Unimplemented),
         If(cond, then, else_) => {
             let (cond_val, cond_type) = codegen(cond, context)?;
             if cond_type != Type::Named("Bool".to_string()) {
@@ -208,11 +207,11 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let parent_block = LLVMGetInsertBlock(context.builder);
             let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, then_block);
-            let (mut then_val, then_type) = codegen_block(then, context)?;
+            let (mut then_val, then_type) = codegen(then, context)?;
             let mut then_end = LLVMGetInsertBlock(context.builder);
             let else_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, else_block);
-            let (mut else_val, else_type) = codegen_block(else_, context)?;
+            let (mut else_val, else_type) = codegen(else_, context)?;
             let mut else_end = LLVMGetInsertBlock(context.builder);
             if then_type != else_type {
                 return Err(Error::ConflictingType(then_type, else_type));
@@ -241,7 +240,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             }
             let body_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, body_block);
-            let _ = codegen_block(body, context)?;
+            let _ = codegen(body, context)?;
             LLVMBuildBr(context.builder, cond_block);
             LLVMPositionBuilderAtEnd(context.builder, cond_block);
             let merge_block = LLVMAppendBasicBlock(function, BB_C_NAME);
@@ -298,7 +297,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                     _ => return Err(Error::AssignToExpr),
                 }
             }
-            let (ret_val, inferred_ret_type) = codegen_block(body, &mut Context { names: inner_names, .. *context })?;
+            let (ret_val, inferred_ret_type) = codegen(body, &mut Context { names: inner_names, .. *context })?;
             LLVMBuildRet(context.builder, ret_val);
             if **ret_type != inferred_ret_type {
                 return Err(Error::ConflictingType(inferred_ret_type, *ret_type.clone()));

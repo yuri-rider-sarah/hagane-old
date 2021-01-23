@@ -1,9 +1,9 @@
 let. x 1
 
 let. incr_x λ.() {
-    set. x (+ x 1)
+    set. x +(x 1)
 } '(:#())
 
-(print x)
-(incr_x)
-(print x)
+print(x)
+incr_x()
+print(x)
