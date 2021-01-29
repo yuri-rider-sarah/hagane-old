@@ -43,12 +43,10 @@ fn main() {
             std::process::exit(1);
         },
     };
-    let mut chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
-    chars.reverse();
+    let chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
     let mut tokens = lexer::Tokens::new(chars);
     let mut exprs = Vec::new();
-    while let Some(t) = lexer::read_token_or_eof(&mut tokens).unwrap() {
-        lexer::return_token(&mut tokens, t);
+    while !lexer::lexer_at_eof(&tokens) {
         exprs.push(parser::read_block_expr(&mut tokens).unwrap());
     }
     unsafe {

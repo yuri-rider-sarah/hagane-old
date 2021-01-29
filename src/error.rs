@@ -14,6 +14,7 @@ pub enum Error {
     MismatchedParamsNum(usize, usize),
     NotAFunction(Type),
     AssignToExpr,
+    InconsistentIndentation(char, char),
     Unimplemented,
 }
 
