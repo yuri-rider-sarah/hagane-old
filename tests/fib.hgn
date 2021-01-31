@@ -1,5 +1,5 @@
-let. fib λ.(n){n} '(Int : Int)
-set. fib λ.(n) {
+let. fib λ.{n}{n} '(Int : Int)
+set. fib λ.{n} {
     let. a 0
     let. b 1
     while. >(n 0) {
