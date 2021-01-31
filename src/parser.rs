@@ -41,6 +41,7 @@ fn read_expr(tokens: &mut Tokens) -> Result<Expr> {
     }
 }
 
+#[derive(Debug)]
 enum Clause {
     SecKeyword(String),
     Block(Vec<Expr>),
@@ -142,14 +143,18 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
         Token::PriKeyword(keyword) => {
             let mut clauses = Vec::new();
             loop {
-                let at_eol = lexer_at_eol(tokens);
+                let at_line_start = lexer_at_line_start(tokens);
                 clauses.push(match read_token_or_indent(tokens)? {
                     Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                     Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                     Token::LIndent => Clause::Block(read_block_indent_r(tokens)?),
+                    Token::RBrace | Token::RIndent => {
+                        undo_read_token(tokens);
+                        break;
+                    },
                     _ => {
                         undo_read_token(tokens);
-                        if at_eol {
+                        if at_line_start {
                             break;
                         }
                         Clause::Block(vec![read_expr(tokens)?])

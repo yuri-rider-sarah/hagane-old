@@ -69,6 +69,7 @@ struct LexerState {
     indents: Vec<usize>,
     rindents: usize,
     last_indent_depth: usize,
+    at_line_start: bool,
 }
 
 pub struct Tokens {
@@ -86,6 +87,7 @@ impl Tokens {
                 indents: Vec::new(),
                 rindents: 0,
                 last_indent_depth: 0,
+                at_line_start: true,
             },
             old_states: Vec::new(),
         }
@@ -107,11 +109,13 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: bool) -> Re
         state.rindents -= 1;
         return Ok(RIndent);
     }
+    state.at_line_start = false;
     let mut c = read_char(chars, state);
     while let Some(c0) = c {
         if !is_white_space(c0) {
             break;
         } else if NEWLINE_CHARS.contains(&c0) {
+            state.at_line_start = true;
             c = read_char(chars, state);
             if c0 == '\r' && c == Some('\n') { // CRLF
                 c = read_char(chars, state);
@@ -241,16 +245,8 @@ pub fn undo_read_token(tokens: &mut Tokens) {
     tokens.state = tokens.old_states.pop().unwrap();
 }
 
-pub fn lexer_at_eol(tokens: &Tokens) -> bool {
-    let mut state = tokens.state.clone();
-    while let Some(c) = read_char(&tokens.chars, &mut state) {
-        if NEWLINE_CHARS.contains(&c) {
-            return true;
-        } else if !is_white_space(c) {
-            return false;
-        }
-    }
-    return true;
+pub fn lexer_at_line_start(tokens: &Tokens) -> bool {
+    tokens.state.at_line_start && tokens.state.rindents == 0
 }
 
 pub fn lexer_at_eof(tokens: &Tokens) -> bool {
