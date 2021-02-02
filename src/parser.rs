@@ -148,7 +148,7 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
                     Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                     Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                     Token::LIndent => Clause::Block(read_block_indent_r(tokens)?),
-                    Token::RBrace | Token::RIndent => {
+                    Token::RBrace | Token::RIndent | Token::Eof => {
                         undo_read_token(tokens);
                         break;
                     },
