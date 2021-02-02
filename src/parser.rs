@@ -123,11 +123,30 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
                 clauses.push(match read_token_or_indent(tokens)? {
                     Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                     Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
-                    Token::LIndent => Clause::Block(read_block_indent_r(tokens)?),
+                    Token::LIndent => {
+                        match read_token(tokens)? {
+                            Token::SecKeyword(keyword) => {
+                                undo_read_token(tokens);
+                                undo_read_token(tokens);
+                                let _ = read_token(tokens)?;
+                                Clause::SecKeyword(keyword)
+                            },
+                            Token::LBrace => {
+                                undo_read_token(tokens);
+                                undo_read_token(tokens);
+                                let _ = read_token(tokens)?;
+                                Clause::Block(read_block_brace_r(tokens)?)
+                            },
+                            _ => {
+                                undo_read_token(tokens);
+                                Clause::Block(read_block_indent_r(tokens)?)
+                            },
+                        }
+                    },
                     Token::RParen => break,
                     _ => {
                         undo_read_token(tokens);
-                        Clause::Block(vec![read_expr(tokens)?])
+                        Clause::Block(vec![read_clause_expr(tokens)?])
                     },
                 });
             }
@@ -147,7 +166,26 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
                 clauses.push(match read_token_or_indent(tokens)? {
                     Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                     Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
-                    Token::LIndent => Clause::Block(read_block_indent_r(tokens)?),
+                    Token::LIndent => {
+                        match read_token(tokens)? {
+                            Token::SecKeyword(keyword) => {
+                                undo_read_token(tokens);
+                                undo_read_token(tokens);
+                                let _ = read_token(tokens)?;
+                                Clause::SecKeyword(keyword)
+                            },
+                            Token::LBrace => {
+                                undo_read_token(tokens);
+                                undo_read_token(tokens);
+                                let _ = read_token(tokens)?;
+                                Clause::Block(read_block_brace_r(tokens)?)
+                            },
+                            _ => {
+                                undo_read_token(tokens);
+                                Clause::Block(read_block_indent_r(tokens)?)
+                            },
+                        }
+                    },
                     Token::RBrace | Token::RIndent | Token::Eof => {
                         undo_read_token(tokens);
                         break;
@@ -157,7 +195,7 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
                         if at_line_start {
                             break;
                         }
-                        Clause::Block(vec![read_expr(tokens)?])
+                        Clause::Block(vec![read_clause_expr(tokens)?])
                     },
                 });
             }
@@ -168,6 +206,98 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
             read_expr(tokens)?
         },
     })
+}
+
+fn read_clause_special_expr_clauses(tokens: &mut Tokens) -> Result<Vec<Clause>> {
+    let mut past_indent = false;
+    let mut clauses = Vec::new();
+    loop {
+        let at_line_start = lexer_at_line_start(tokens);
+        clauses.push(match read_token_or_indent(tokens)? {
+            Token::SecKeyword(keyword) => {
+                if at_line_start && !past_indent {
+                    undo_read_token(tokens);
+                    break;
+                }
+                Clause::SecKeyword(keyword)
+            },
+            Token::LBrace => {
+                if at_line_start && !past_indent {
+                    undo_read_token(tokens);
+                    break;
+                }
+                Clause::Block(read_block_brace_r(tokens)?)
+            },
+            Token::LIndent => {
+                match read_token(tokens)? {
+                    Token::SecKeyword(keyword) => {
+                        if past_indent {
+                            undo_read_token(tokens);
+                            undo_read_token(tokens);
+                            let _ = read_token(tokens)?;
+                        } else {
+                            past_indent = true;
+                        }
+                        Clause::SecKeyword(keyword)
+                    },
+                    Token::LBrace => {
+                        if past_indent {
+                            undo_read_token(tokens);
+                            undo_read_token(tokens);
+                            let _ = read_token(tokens)?;
+                        } else {
+                            past_indent = true;
+                        }
+                        Clause::Block(read_block_brace_r(tokens)?)
+                    },
+                    _ => {
+                        undo_read_token(tokens);
+                        Clause::Block(read_block_indent_r(tokens)?)
+                    },
+                }
+            },
+            Token::RBrace | Token::RIndent | Token::Eof => {
+                undo_read_token(tokens);
+                break;
+            },
+            _ => {
+                undo_read_token(tokens);
+                if at_line_start {
+                    break;
+                }
+                Clause::Block(vec![read_clause_expr(tokens)?])
+            },
+        });
+    }
+    if past_indent {
+        match read_token(tokens)? {
+            Token::RIndent => (),
+            t => return Err(Error::UnexpectedToken(Some(t))),
+        }
+    }
+    Ok(clauses)
+}
+
+fn read_clause_expr(tokens: &mut Tokens) -> Result<Expr> {
+    match read_token(tokens)? {
+        Token::PriKeyword(keyword) => {
+            match read_token(tokens)? {
+                Token::LParen => {
+                    undo_read_token(tokens);
+                    undo_read_token(tokens);
+                    read_expr(tokens)
+                },
+                _ => {
+                    undo_read_token(tokens);
+                    Ok(Expr(uexpr_from_clauses(&keyword, &read_clause_special_expr_clauses(tokens)?)?, None))
+                },
+            }
+        },
+        _ => {
+            undo_read_token(tokens);
+            read_expr(tokens)
+        },
+    }
 }
 
 fn read_bracketed_list_r<T>(
