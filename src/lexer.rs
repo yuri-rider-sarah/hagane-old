@@ -109,7 +109,6 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: bool) -> Re
         state.rindents -= 1;
         return Ok(RIndent);
     }
-    state.at_line_start = false;
     let mut c = read_char(chars, state);
     while let Some(c0) = c {
         if !is_white_space(c0) {
@@ -173,6 +172,7 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: bool) -> Re
         }
         c = read_char(chars, state);
     }
+    state.at_line_start = false;
     let c0 = match c {
         Some(c0) => c0,
         None => return Ok(Eof),
@@ -246,7 +246,18 @@ pub fn undo_read_token(tokens: &mut Tokens) {
 }
 
 pub fn lexer_at_line_start(tokens: &Tokens) -> bool {
-    tokens.state.at_line_start && tokens.state.rindents == 0
+    if tokens.state.at_line_start {
+        return true;
+    }
+    let mut state = tokens.state.clone();
+    while let Some(c) = read_char(&tokens.chars, &mut state) {
+        if NEWLINE_CHARS.contains(&c) {
+            return true;
+        } else if !is_white_space(c) {
+            return false;
+        }
+    }
+    return true;
 }
 
 pub fn lexer_at_eof(tokens: &Tokens) -> bool {
