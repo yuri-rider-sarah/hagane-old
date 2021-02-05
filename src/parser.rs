@@ -160,46 +160,56 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
 pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
     Ok(match read_token(tokens)? {
         Token::PriKeyword(keyword) => {
-            let mut clauses = Vec::new();
-            loop {
-                let at_line_start = lexer_at_line_start(tokens);
-                clauses.push(match read_token_or_indent(tokens)? {
-                    Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
-                    Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
-                    Token::LIndent => {
-                        match read_token(tokens)? {
-                            Token::SecKeyword(keyword) => {
-                                undo_read_token(tokens);
-                                undo_read_token(tokens);
-                                let _ = read_token(tokens)?;
-                                Clause::SecKeyword(keyword)
+            match read_token(tokens)? {
+                Token::LParen => {
+                    undo_read_token(tokens);
+                    undo_read_token(tokens);
+                    read_expr(tokens)?
+                },
+                _ => {
+                    undo_read_token(tokens);
+                    let mut clauses = Vec::new();
+                    loop {
+                        let at_line_start = lexer_at_line_start(tokens);
+                        clauses.push(match read_token_or_indent(tokens)? {
+                            Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
+                            Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
+                            Token::LIndent => {
+                                match read_token(tokens)? {
+                                    Token::SecKeyword(keyword) => {
+                                        undo_read_token(tokens);
+                                        undo_read_token(tokens);
+                                        let _ = read_token(tokens)?;
+                                        Clause::SecKeyword(keyword)
+                                    },
+                                    Token::LBrace => {
+                                        undo_read_token(tokens);
+                                        undo_read_token(tokens);
+                                        let _ = read_token(tokens)?;
+                                        Clause::Block(read_block_brace_r(tokens)?)
+                                    },
+                                    _ => {
+                                        undo_read_token(tokens);
+                                        Clause::Block(read_block_indent_r(tokens)?)
+                                    },
+                                }
                             },
-                            Token::LBrace => {
+                            Token::RBrace | Token::RIndent | Token::Eof => {
                                 undo_read_token(tokens);
-                                undo_read_token(tokens);
-                                let _ = read_token(tokens)?;
-                                Clause::Block(read_block_brace_r(tokens)?)
+                                break;
                             },
                             _ => {
                                 undo_read_token(tokens);
-                                Clause::Block(read_block_indent_r(tokens)?)
+                                if at_line_start {
+                                    break;
+                                }
+                                Clause::Block(vec![read_clause_expr(tokens)?])
                             },
-                        }
-                    },
-                    Token::RBrace | Token::RIndent | Token::Eof => {
-                        undo_read_token(tokens);
-                        break;
-                    },
-                    _ => {
-                        undo_read_token(tokens);
-                        if at_line_start {
-                            break;
-                        }
-                        Clause::Block(vec![read_clause_expr(tokens)?])
-                    },
-                });
+                        });
+                    }
+                    Expr(uexpr_from_clauses(&keyword, &clauses)?, None)
+                },
             }
-            Expr(uexpr_from_clauses(&keyword, &clauses)?, None)
         },
         _ => {
             undo_read_token(tokens);
