@@ -1,5 +1,4 @@
-let. f λ.(a b c d e) {
-    d
-} '(Int Int Int Int Int : Int)
+let. f λ. {a'Int b'Int c'Int d'Int e'Int}
+    d 'Int
 
 print(f(1 2 3 4 5))

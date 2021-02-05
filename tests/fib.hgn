@@ -1,14 +1,12 @@
-let. fib λ.{n}{n} '(Int : Int)
-set. fib λ.{n} {
+let. fib λ.{n 'Int} n 'Int
+set. fib λ.{n 'Int}
     let. a 0
     let. b 1
-    while. >(n 0) {
+    while. >(n 0)
         let. t +(a b)
         set. a b
         set. b t
         set. n -(n 1)
-    }
-    a
-} '(Int : Int)
+    a 'Int
 
 print(fib(92))

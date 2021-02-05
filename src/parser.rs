@@ -7,12 +7,12 @@ pub enum UExpr {
     Ident(String),
     Tuple(Vec<Expr>),
     Call(Box<Expr>, Vec<Expr>),
-    Let(Box<Expr>, Box<Expr>),
-    Set(Box<Expr>, Box<Expr>),
-    If(Box<Expr>, Box<Expr>, Box<Expr>),
-    While(Box<Expr>, Box<Expr>),
+    Let(Box<Expr>, Vec<Expr>),
+    Set(Box<Expr>, Vec<Expr>),
+    If(Vec<Expr>, Vec<Expr>, Vec<Expr>),
+    While(Vec<Expr>, Vec<Expr>),
     Do(Vec<Expr>),
-    Lambda(Vec<Expr>, Box<Expr>),
+    Lambda(Vec<Expr>, Vec<Expr>),
 }
 
 #[derive(Clone, Debug)]
@@ -52,14 +52,14 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
     Ok(match &keyword[..] {
         "let" => match &clauses[..] {
             [Block(var), Block(val)] => match &var[..] {
-                [var] => UExpr::Let(Box::new(var.clone()), Box::new(Expr(UExpr::Do(val.clone()), None))),
+                [var] => UExpr::Let(Box::new(var.clone()), val.clone()),
                 _ => return Err(Error::InvalidExpr),
             },
             _ => return Err(Error::InvalidExpr),
         },
         "set" => match &clauses[..] {
             [Block(var), Block(val)] => match &var[..] {
-                [var] => UExpr::Set(Box::new(var.clone()), Box::new(Expr(UExpr::Do(val.clone()), None))),
+                [var] => UExpr::Set(Box::new(var.clone()), val.clone()),
                 _ => return Err(Error::InvalidExpr),
             },
             _ => return Err(Error::InvalidExpr),
@@ -80,9 +80,9 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
                 _ => return Err(Error::InvalidExpr),
             };
             UExpr::If(
-                Box::new(Expr(UExpr::Do(cond.clone()), None)),
-                Box::new(Expr(UExpr::Do(then.clone()), None)),
-                Box::new(Expr(UExpr::Do(else_.clone()), None)),
+                cond.clone(),
+                then.clone(),
+                else_.clone(),
             )
         },
         "while" => {
@@ -92,8 +92,8 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
                 _ => return Err(Error::InvalidExpr),
             };
             UExpr::While(
-                Box::new(Expr(UExpr::Do(cond.clone()), None)),
-                Box::new(Expr(UExpr::Do(body.clone()), None)),
+                cond.clone(),
+                body.clone(),
             )
         },
         "λ" => {
@@ -102,7 +102,7 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
                 [Block(args), SecKeyword(arrow_kw), Block(body)] if arrow_kw == "⇒" => (args, body),
                 _ => return Err(Error::InvalidExpr),
             };
-            UExpr::Lambda(args.clone(), Box::new(Expr(UExpr::Do(body.clone()), None)))
+            UExpr::Lambda(args.clone(), body.clone())
         },
         _ => return Err(Error::InvalidExpr),
     })

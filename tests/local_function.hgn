@@ -1,9 +1,7 @@
-let. f λ.(x y) {
+let. f λ. {x'Int y'Int}
     let. w +(x y)
-    let. g λ.(x z) {
-        +(x +(y +(z w)))
-    } '(Int Int : Int)
-    g(1 5)
-} '(Int Int : Int)
+    let. g λ. {x'Int z'Int}
+        +(x +(y +(z w))) 'Int
+    g(1 5) 'Int
 
 print(f(2 6))
