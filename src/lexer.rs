@@ -68,7 +68,7 @@ struct LexerState {
     pos: usize,
     indents: Vec<usize>,
     rindents: usize,
-    last_indent_depth: usize,
+    this_indent_depth: usize,
     at_line_start: bool,
 }
 
@@ -86,7 +86,7 @@ impl Tokens {
                 pos: 0,
                 indents: Vec::new(),
                 rindents: 0,
-                last_indent_depth: 0,
+                this_indent_depth: 0,
                 at_line_start: true,
             },
             old_states: Vec::new(),
@@ -103,7 +103,7 @@ fn read_char(chars: &Vec<char>, state: &mut LexerState) -> Option<char> {
     }
 }
 
-fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: bool) -> Result<Token> {
+fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usize>) -> Result<Token> {
     use Token::*;
     if state.rindents > 0 {
         state.rindents -= 1;
@@ -138,8 +138,7 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: bool) -> Re
                 }
                 c = read_char(chars, state);
             }
-            let last_indent_depth = state.last_indent_depth;
-            state.last_indent_depth = indent_depth;
+            state.this_indent_depth = indent_depth;
             if c == None {
                 state.rindents = state.indents.len();
                 if state.rindents > 0 {
@@ -149,10 +148,12 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: bool) -> Re
                     return Ok(Eof);
                 }
             } else {
-                if or_indent && *state.indents.last().unwrap_or(&0) < indent_depth && last_indent_depth < indent_depth {
-                    state.pos -= 1;
-                    state.indents.push(indent_depth);
-                    return Ok(LIndent);
+                if let Some(last_indent_depth) = or_indent {
+                    if *state.indents.last().unwrap_or(&0) < indent_depth && last_indent_depth < indent_depth {
+                        state.pos -= 1;
+                        state.indents.push(indent_depth);
+                        return Ok(LIndent);
+                    }
                 }
                 while let Some(&outer_indent_depth) = state.indents.last() {
                     if indent_depth < outer_indent_depth {
@@ -233,16 +234,20 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: bool) -> Re
 
 pub fn read_token(tokens: &mut Tokens) -> Result<Token> {
     tokens.old_states.push(tokens.state.clone());
-    read_token_(&tokens.chars, &mut tokens.state, false)
+    read_token_(&tokens.chars, &mut tokens.state, None)
 }
 
-pub fn read_token_or_indent(tokens: &mut Tokens) -> Result<Token> {
+pub fn read_token_or_indent(tokens: &mut Tokens, last_indent_depth: usize) -> Result<Token> {
     tokens.old_states.push(tokens.state.clone());
-    read_token_(&tokens.chars, &mut tokens.state, true)
+    read_token_(&tokens.chars, &mut tokens.state, Some(last_indent_depth))
 }
 
 pub fn undo_read_token(tokens: &mut Tokens) {
     tokens.state = tokens.old_states.pop().unwrap();
+}
+
+pub fn lexer_indent_depth(tokens: &Tokens) -> usize {
+    tokens.state.this_indent_depth
 }
 
 pub fn lexer_at_line_start(tokens: &Tokens) -> bool {

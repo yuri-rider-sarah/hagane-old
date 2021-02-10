@@ -114,13 +114,14 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
         Token::Ident(n) => UExpr::Ident(n),
         Token::Hash => UExpr::Tuple(read_arg_list(tokens)?),
         Token::PriKeyword(keyword) => {
+            let indent_depth = lexer_indent_depth(tokens);
             let t = read_token(tokens)?;
             if t != Token::LParen {
                 return Err(Error::UnexpectedToken(Some(t)));
             }
             let mut clauses = Vec::new();
             loop {
-                clauses.push(match read_token_or_indent(tokens)? {
+                clauses.push(match read_token_or_indent(tokens, indent_depth)? {
                     Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                     Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                     Token::LIndent => {
@@ -160,6 +161,7 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
 pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
     Ok(match read_token(tokens)? {
         Token::PriKeyword(keyword) => {
+            let indent_depth = lexer_indent_depth(tokens);
             match read_token(tokens)? {
                 Token::LParen => {
                     undo_read_token(tokens);
@@ -171,7 +173,7 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
                     let mut clauses = Vec::new();
                     loop {
                         let at_line_start = lexer_at_line_start(tokens);
-                        clauses.push(match read_token_or_indent(tokens)? {
+                        clauses.push(match read_token_or_indent(tokens, indent_depth)? {
                             Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                             Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                             Token::LIndent => {
@@ -218,12 +220,12 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
     })
 }
 
-fn read_clause_special_expr_clauses(tokens: &mut Tokens) -> Result<Vec<Clause>> {
+fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) -> Result<Vec<Clause>> {
     let mut past_indent = false;
     let mut clauses = Vec::new();
     loop {
         let at_line_start = lexer_at_line_start(tokens);
-        clauses.push(match read_token_or_indent(tokens)? {
+        clauses.push(match read_token_or_indent(tokens, indent_depth)? {
             Token::SecKeyword(keyword) => {
                 if at_line_start && !past_indent {
                     undo_read_token(tokens);
@@ -291,6 +293,7 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens) -> Result<Vec<Clause>> 
 fn read_clause_expr(tokens: &mut Tokens) -> Result<Expr> {
     match read_token(tokens)? {
         Token::PriKeyword(keyword) => {
+            let indent_depth = lexer_indent_depth(tokens);
             match read_token(tokens)? {
                 Token::LParen => {
                     undo_read_token(tokens);
@@ -299,7 +302,7 @@ fn read_clause_expr(tokens: &mut Tokens) -> Result<Expr> {
                 },
                 _ => {
                     undo_read_token(tokens);
-                    Ok(Expr(uexpr_from_clauses(&keyword, &read_clause_special_expr_clauses(tokens)?)?, None))
+                    Ok(Expr(uexpr_from_clauses(&keyword, &read_clause_special_expr_clauses(tokens, indent_depth)?)?, None))
                 },
             }
         },
