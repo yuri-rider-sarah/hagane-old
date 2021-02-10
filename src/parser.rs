@@ -28,13 +28,14 @@ pub enum Type {
 fn read_expr(tokens: &mut Tokens) -> Result<Expr> {
     let mut expr = read_simple_expr(tokens)?;
     loop {
+        let state = get_lexer_state(tokens);
         match read_token(tokens)? {
             Token::LParen => expr = Expr(
                 UExpr::Call(Box::new(expr), read_arg_list_r(tokens)?),
                 read_type_signature(tokens)?,
             ),
             _ => {
-                undo_read_token(tokens);
+                restore_lexer_state(tokens, state);
                 return Ok(expr);
             },
         }
@@ -121,32 +122,32 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
             }
             let mut clauses = Vec::new();
             loop {
+                let state = get_lexer_state(tokens);
                 clauses.push(match read_token_or_indent(tokens, indent_depth)? {
                     Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                     Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                     Token::LIndent => {
+                        let state_indent = get_lexer_state(tokens);
                         match read_token(tokens)? {
                             Token::SecKeyword(keyword) => {
-                                undo_read_token(tokens);
-                                undo_read_token(tokens);
+                                restore_lexer_state(tokens, state);
                                 let _ = read_token(tokens)?;
                                 Clause::SecKeyword(keyword)
                             },
                             Token::LBrace => {
-                                undo_read_token(tokens);
-                                undo_read_token(tokens);
+                                restore_lexer_state(tokens, state);
                                 let _ = read_token(tokens)?;
                                 Clause::Block(read_block_brace_r(tokens)?)
                             },
                             _ => {
-                                undo_read_token(tokens);
+                                restore_lexer_state(tokens, state_indent);
                                 Clause::Block(read_block_indent_r(tokens)?)
                             },
                         }
                     },
                     Token::RParen => break,
                     _ => {
-                        undo_read_token(tokens);
+                        restore_lexer_state(tokens, state);
                         Clause::Block(vec![read_clause_expr(tokens)?])
                     },
                 });
@@ -159,49 +160,50 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
 }
 
 pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
+    let state = get_lexer_state(tokens);
     Ok(match read_token(tokens)? {
         Token::PriKeyword(keyword) => {
+            let state_kw = get_lexer_state(tokens);
             let indent_depth = lexer_indent_depth(tokens);
             match read_token(tokens)? {
                 Token::LParen => {
-                    undo_read_token(tokens);
-                    undo_read_token(tokens);
+                    restore_lexer_state(tokens, state);
                     read_expr(tokens)?
                 },
                 _ => {
-                    undo_read_token(tokens);
+                    restore_lexer_state(tokens, state_kw);
                     let mut clauses = Vec::new();
                     loop {
+                        let state_loop = get_lexer_state(tokens);
                         let at_line_start = lexer_at_line_start(tokens);
                         clauses.push(match read_token_or_indent(tokens, indent_depth)? {
                             Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
                             Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                             Token::LIndent => {
+                                let state_indent = get_lexer_state(tokens);
                                 match read_token(tokens)? {
                                     Token::SecKeyword(keyword) => {
-                                        undo_read_token(tokens);
-                                        undo_read_token(tokens);
+                                        restore_lexer_state(tokens, state_loop);
                                         let _ = read_token(tokens)?;
                                         Clause::SecKeyword(keyword)
                                     },
                                     Token::LBrace => {
-                                        undo_read_token(tokens);
-                                        undo_read_token(tokens);
+                                        restore_lexer_state(tokens, state_loop);
                                         let _ = read_token(tokens)?;
                                         Clause::Block(read_block_brace_r(tokens)?)
                                     },
                                     _ => {
-                                        undo_read_token(tokens);
+                                        restore_lexer_state(tokens, state_indent);
                                         Clause::Block(read_block_indent_r(tokens)?)
                                     },
                                 }
                             },
                             Token::RBrace | Token::RIndent | Token::Eof => {
-                                undo_read_token(tokens);
+                                restore_lexer_state(tokens, state_loop);
                                 break;
                             },
                             _ => {
-                                undo_read_token(tokens);
+                                restore_lexer_state(tokens, state_loop);
                                 if at_line_start {
                                     break;
                                 }
@@ -214,7 +216,7 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
             }
         },
         _ => {
-            undo_read_token(tokens);
+            restore_lexer_state(tokens, state);
             read_expr(tokens)?
         },
     })
@@ -224,28 +226,29 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) ->
     let mut past_indent = false;
     let mut clauses = Vec::new();
     loop {
+        let state = get_lexer_state(tokens);
         let at_line_start = lexer_at_line_start(tokens);
         clauses.push(match read_token_or_indent(tokens, indent_depth)? {
             Token::SecKeyword(keyword) => {
                 if at_line_start && !past_indent {
-                    undo_read_token(tokens);
+                    restore_lexer_state(tokens, state);
                     break;
                 }
                 Clause::SecKeyword(keyword)
             },
             Token::LBrace => {
                 if at_line_start && !past_indent {
-                    undo_read_token(tokens);
+                    restore_lexer_state(tokens, state);
                     break;
                 }
                 Clause::Block(read_block_brace_r(tokens)?)
             },
             Token::LIndent => {
+                let state_indent = get_lexer_state(tokens);
                 match read_token(tokens)? {
                     Token::SecKeyword(keyword) => {
                         if past_indent {
-                            undo_read_token(tokens);
-                            undo_read_token(tokens);
+                            restore_lexer_state(tokens, state);
                             let _ = read_token(tokens)?;
                         } else {
                             past_indent = true;
@@ -254,8 +257,7 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) ->
                     },
                     Token::LBrace => {
                         if past_indent {
-                            undo_read_token(tokens);
-                            undo_read_token(tokens);
+                            restore_lexer_state(tokens, state);
                             let _ = read_token(tokens)?;
                         } else {
                             past_indent = true;
@@ -263,17 +265,17 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) ->
                         Clause::Block(read_block_brace_r(tokens)?)
                     },
                     _ => {
-                        undo_read_token(tokens);
+                        restore_lexer_state(tokens, state_indent);
                         Clause::Block(read_block_indent_r(tokens)?)
                     },
                 }
             },
             Token::RBrace | Token::RIndent | Token::Eof => {
-                undo_read_token(tokens);
+                restore_lexer_state(tokens, state);
                 break;
             },
             _ => {
-                undo_read_token(tokens);
+                restore_lexer_state(tokens, state);
                 if at_line_start {
                     break;
                 }
@@ -291,23 +293,24 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) ->
 }
 
 fn read_clause_expr(tokens: &mut Tokens) -> Result<Expr> {
+    let state = get_lexer_state(tokens);
     match read_token(tokens)? {
         Token::PriKeyword(keyword) => {
+            let state_kw = get_lexer_state(tokens);
             let indent_depth = lexer_indent_depth(tokens);
             match read_token(tokens)? {
                 Token::LParen => {
-                    undo_read_token(tokens);
-                    undo_read_token(tokens);
+                    restore_lexer_state(tokens, state);
                     read_expr(tokens)
                 },
                 _ => {
-                    undo_read_token(tokens);
+                    restore_lexer_state(tokens, state_kw);
                     Ok(Expr(uexpr_from_clauses(&keyword, &read_clause_special_expr_clauses(tokens, indent_depth)?)?, None))
                 },
             }
         },
         _ => {
-            undo_read_token(tokens);
+            restore_lexer_state(tokens, state);
             read_expr(tokens)
         },
     }
@@ -320,11 +323,12 @@ fn read_bracketed_list_r<T>(
 ) -> Result<T>) -> Result<Vec<T>> {
     let mut v = Vec::new();
     loop {
+        let state = get_lexer_state(tokens);
         let t = read_token(tokens)?;
         if is_right(&t) {
             return Ok(v);
         } else {
-            undo_read_token(tokens);
+            restore_lexer_state(tokens, state);
             v.push(read_element(tokens)?);
         }
     }
@@ -360,12 +364,13 @@ fn read_arg_list_r(tokens: &mut Tokens) -> Result<Vec<Expr>> {
 }
 
 fn read_type_signature(tokens: &mut Tokens) -> Result<Option<Type>> {
+    let state = get_lexer_state(tokens);
     Ok(match read_token(tokens)? {
         Token::Apostrophe => {
             Some(read_type(tokens)?)
         },
         _ => {
-            undo_read_token(tokens);
+            restore_lexer_state(tokens, state);
             None
         },
     })

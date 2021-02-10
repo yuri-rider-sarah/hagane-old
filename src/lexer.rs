@@ -64,7 +64,7 @@ fn is_starting_ident_character(c: char) -> bool {
 }
 
 #[derive(Clone)]
-struct LexerState {
+pub struct LexerState {
     pos: usize,
     indents: Vec<usize>,
     rindents: usize,
@@ -75,7 +75,6 @@ struct LexerState {
 pub struct Tokens {
     chars: Vec<char>,
     state: LexerState,
-    old_states: Vec<LexerState>,
 }
 
 impl Tokens {
@@ -89,7 +88,6 @@ impl Tokens {
                 this_indent_depth: 0,
                 at_line_start: true,
             },
-            old_states: Vec::new(),
         }
     }
 }
@@ -233,17 +231,19 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
 }
 
 pub fn read_token(tokens: &mut Tokens) -> Result<Token> {
-    tokens.old_states.push(tokens.state.clone());
     read_token_(&tokens.chars, &mut tokens.state, None)
 }
 
 pub fn read_token_or_indent(tokens: &mut Tokens, last_indent_depth: usize) -> Result<Token> {
-    tokens.old_states.push(tokens.state.clone());
     read_token_(&tokens.chars, &mut tokens.state, Some(last_indent_depth))
 }
 
-pub fn undo_read_token(tokens: &mut Tokens) {
-    tokens.state = tokens.old_states.pop().unwrap();
+pub fn get_lexer_state(tokens: &Tokens) -> LexerState {
+    tokens.state.clone()
+}
+
+pub fn restore_lexer_state(tokens: &mut Tokens, state: LexerState) {
+    tokens.state = state
 }
 
 pub fn lexer_indent_depth(tokens: &Tokens) -> usize {
