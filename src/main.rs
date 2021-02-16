@@ -44,7 +44,7 @@ fn main() {
         },
     };
     let chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
-    let mut tokens = lexer::Tokens::new(chars);
+    let mut tokens = lexer::Tokens::new(chars).unwrap();
     let mut exprs = Vec::new();
     while !lexer::lexer_at_eof(&tokens) {
         exprs.push(parser::read_block_expr(&mut tokens).unwrap());

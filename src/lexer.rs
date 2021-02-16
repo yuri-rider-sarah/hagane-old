@@ -78,8 +78,8 @@ pub struct Tokens {
 }
 
 impl Tokens {
-    pub fn new(chars: Vec<char>) -> Tokens {
-        Tokens {
+    pub fn new(chars: Vec<char>) -> Result<Tokens> {
+        let mut tokens = Tokens {
             chars,
             state: LexerState {
                 pos: 0,
@@ -88,7 +88,9 @@ impl Tokens {
                 this_indent_depth: 0,
                 at_line_start: true,
             },
-        }
+        };
+        read_indent(&tokens.chars, &mut tokens.state)?;
+        Ok(tokens)
     }
 }
 
@@ -99,6 +101,30 @@ fn read_char(chars: &Vec<char>, state: &mut LexerState) -> Option<char> {
     } else {
         None
     }
+}
+
+fn read_indent(chars: &Vec<char>, state: &mut LexerState) -> Result<usize> {
+    // TODO allow indenting with different characters
+    let indent_char = ' ';
+    let mut indent_depth = 0;
+    while let Some(c0) = read_char(chars, state) {
+        if NEWLINE_CHARS.contains(&c0) {
+            let c = read_char(chars, state);
+            if !(c0 == '\r' && c == Some('\n')) { // no CRLF
+                state.pos -= 1;
+            }
+            indent_depth = 0;
+        } else if c0 == indent_char {
+            indent_depth += 1;
+        } else if is_white_space(c0) {
+            return Err(Error::InconsistentIndentation(indent_char, c0));
+        } else {
+            break;
+        }
+    }
+    state.pos -= 1;
+    state.this_indent_depth = indent_depth;
+    Ok(indent_depth)
 }
 
 fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usize>) -> Result<Token> {
@@ -114,29 +140,11 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
         } else if NEWLINE_CHARS.contains(&c0) {
             state.at_line_start = true;
             c = read_char(chars, state);
-            if c0 == '\r' && c == Some('\n') { // CRLF
-                c = read_char(chars, state);
+            if !(c0 == '\r' && c == Some('\n')) { // no CRLF
+                state.pos -= 1;
             }
-            // TODO allow indenting with different characters
-            let indent_char = ' ';
-            let mut indent_depth = 0;
-            while let Some(c0) = c {
-                if NEWLINE_CHARS.contains(&c0) {
-                    c = read_char(chars, state);
-                    if !(c0 == '\r' && c == Some('\n')) { // no CRLF
-                        state.pos -= 1;
-                    }
-                    indent_depth = 0;
-                } else if c0 == indent_char {
-                    indent_depth += 1;
-                } else if is_white_space(c0) {
-                    return Err(Error::InconsistentIndentation(indent_char, c0));
-                } else {
-                    break;
-                }
-                c = read_char(chars, state);
-            }
-            state.this_indent_depth = indent_depth;
+            let indent_depth = read_indent(chars, state)?;
+            c = read_char(chars, state);
             if c == None {
                 state.rindents = state.indents.len();
                 if state.rindents > 0 {
@@ -254,7 +262,7 @@ pub fn lexer_at_line_start(tokens: &Tokens) -> bool {
     if tokens.state.at_line_start {
         return true;
     }
-    let mut state = tokens.state.clone();
+    let mut state = get_lexer_state(tokens);
     while let Some(c) = read_char(&tokens.chars, &mut state) {
         if NEWLINE_CHARS.contains(&c) {
             return true;
