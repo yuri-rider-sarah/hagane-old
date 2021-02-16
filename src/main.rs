@@ -46,7 +46,12 @@ fn main() {
     let chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
     let mut tokens = lexer::Tokens::new(chars).unwrap();
     let mut exprs = Vec::new();
-    while !lexer::lexer_at_eof(&tokens) {
+    loop {
+        let state = lexer::get_lexer_state(&tokens);
+        if lexer::read_token(&mut tokens).unwrap() == lexer::Token::Eof {
+            break;
+        }
+        lexer::restore_lexer_state(&mut tokens, state);
         exprs.push(parser::read_block_expr(&mut tokens).unwrap());
     }
     unsafe {

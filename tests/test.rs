@@ -59,3 +59,4 @@ test!(fib, "7540113804746346429");
 test!(while_nested, "3025");
 test!(block_expr_in_braces, "1");
 test!(first_indent, "1");
+test!(comment, "1\n1");

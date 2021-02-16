@@ -26,8 +26,8 @@ const NEWLINE_CHARS: [char; 7] = [
     '\n', '\x0B', '\x0C', '\r', '\u{0085}', '\u{2028}', '\u{2029}',
 ];
 
-const AFTER_IDENT_CHARS: [char; 8] = [
-    '(', ')', '[', ']', '{', '}', '\'', ':',
+const AFTER_IDENT_CHARS: [char; 9] = [
+    '(', ')', '[', ']', '{', '}', '\'', ':', '※',
 ];
 
 const PERMITTED_PUNCTUATION: [char; 30] = [
@@ -63,7 +63,7 @@ fn is_starting_ident_character(c: char) -> bool {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LexerState {
     pos: usize,
     indents: Vec<usize>,
@@ -103,12 +103,27 @@ fn read_char(chars: &Vec<char>, state: &mut LexerState) -> Option<char> {
     }
 }
 
+fn skip_comment(chars: &Vec<char>, state: &mut LexerState) {
+    while let Some(c0) = read_char(chars, state) {
+        if NEWLINE_CHARS.contains(&c0) {
+            let c = read_char(chars, state);
+            if !(c0 == '\r' && c == Some('\n')) { // no CRLF
+                state.pos -= 1;
+            }
+            break;
+        }
+    }
+}
+
 fn read_indent(chars: &Vec<char>, state: &mut LexerState) -> Result<usize> {
     // TODO allow indenting with different characters
     let indent_char = ' ';
     let mut indent_depth = 0;
     while let Some(c0) = read_char(chars, state) {
-        if NEWLINE_CHARS.contains(&c0) {
+        if c0 == '※' {
+            skip_comment(chars, state);
+            indent_depth = 0;
+        } else if NEWLINE_CHARS.contains(&c0) {
             let c = read_char(chars, state);
             if !(c0 == '\r' && c == Some('\n')) { // no CRLF
                 state.pos -= 1;
@@ -135,13 +150,15 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
     }
     let mut c = read_char(chars, state);
     while let Some(c0) = c {
-        if !is_white_space(c0) {
-            break;
-        } else if NEWLINE_CHARS.contains(&c0) {
+        if c0 == '※' || NEWLINE_CHARS.contains(&c0) {
             state.at_line_start = true;
-            c = read_char(chars, state);
-            if !(c0 == '\r' && c == Some('\n')) { // no CRLF
-                state.pos -= 1;
+            if c0 == '※' {
+                skip_comment(chars, state);
+            } else {
+                c = read_char(chars, state);
+                if !(c0 == '\r' && c == Some('\n')) { // no CRLF
+                    state.pos -= 1;
+                }
             }
             let indent_depth = read_indent(chars, state)?;
             c = read_char(chars, state);
@@ -176,6 +193,8 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
                 }
                 break;
             }
+        } else if !is_white_space(c0) {
+            break;
         }
         c = read_char(chars, state);
     }
@@ -264,19 +283,9 @@ pub fn lexer_at_line_start(tokens: &Tokens) -> bool {
     }
     let mut state = get_lexer_state(tokens);
     while let Some(c) = read_char(&tokens.chars, &mut state) {
-        if NEWLINE_CHARS.contains(&c) {
+        if c == '※' || NEWLINE_CHARS.contains(&c) {
             return true;
         } else if !is_white_space(c) {
-            return false;
-        }
-    }
-    return true;
-}
-
-pub fn lexer_at_eof(tokens: &Tokens) -> bool {
-    let mut state = tokens.state.clone();
-    while let Some(c) = read_char(&tokens.chars, &mut state) {
-        if !is_white_space(c) {
             return false;
         }
     }

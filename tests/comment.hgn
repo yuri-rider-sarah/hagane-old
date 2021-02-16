@@ -1,0 +1,11 @@
+※ print "1"
+print(1) ※ this prints "1"
+if. ⊥※this will never execute
+        ※ comments may be unaligned to the right
+    if. ⊤※always true
+※ comments may be unaligned to the left
+        print(0) ※ this prints "0"
+    else, print(2)
+    ※ this will always execute
+else, print(1)
+※ comments may occur at the end of file
