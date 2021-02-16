@@ -148,7 +148,7 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
                     Token::RParen => break,
                     _ => {
                         restore_lexer_state(tokens, state);
-                        Clause::Block(vec![read_clause_expr(tokens)?])
+                        Clause::Block(vec![read_expr(tokens)?])
                     },
                 });
             }
