@@ -106,10 +106,6 @@ fn read_char(chars: &Vec<char>, state: &mut LexerState) -> Option<char> {
 fn skip_comment(chars: &Vec<char>, state: &mut LexerState) {
     while let Some(c0) = read_char(chars, state) {
         if NEWLINE_CHARS.contains(&c0) {
-            let c = read_char(chars, state);
-            if !(c0 == '\r' && c == Some('\n')) { // no CRLF
-                state.pos -= 1;
-            }
             break;
         }
     }
@@ -124,10 +120,6 @@ fn read_indent(chars: &Vec<char>, state: &mut LexerState) -> Result<usize> {
             skip_comment(chars, state);
             indent_depth = 0;
         } else if NEWLINE_CHARS.contains(&c0) {
-            let c = read_char(chars, state);
-            if !(c0 == '\r' && c == Some('\n')) { // no CRLF
-                state.pos -= 1;
-            }
             indent_depth = 0;
         } else if c0 == indent_char {
             indent_depth += 1;
@@ -154,11 +146,6 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
             state.at_line_start = true;
             if c0 == '※' {
                 skip_comment(chars, state);
-            } else {
-                c = read_char(chars, state);
-                if !(c0 == '\r' && c == Some('\n')) { // no CRLF
-                    state.pos -= 1;
-                }
             }
             let indent_depth = read_indent(chars, state)?;
             c = read_char(chars, state);
