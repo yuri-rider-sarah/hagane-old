@@ -67,6 +67,7 @@ fn is_starting_ident_character(c: char) -> bool {
 pub struct LexerState {
     pos: usize,
     indents: Vec<usize>,
+    indent_char: Option<char>,
     rindents: usize,
     this_indent_depth: usize,
     at_line_start: bool,
@@ -84,6 +85,7 @@ impl Tokens {
             state: LexerState {
                 pos: 0,
                 indents: Vec::new(),
+                indent_char: None,
                 rindents: 0,
                 this_indent_depth: 0,
                 at_line_start: true,
@@ -112,8 +114,6 @@ fn skip_comment(chars: &Vec<char>, state: &mut LexerState) {
 }
 
 fn read_indent(chars: &Vec<char>, state: &mut LexerState) -> Result<usize> {
-    // TODO allow indenting with different characters
-    let indent_char = ' ';
     let mut indent_depth = 0;
     while let Some(c0) = read_char(chars, state) {
         if c0 == '※' {
@@ -121,10 +121,18 @@ fn read_indent(chars: &Vec<char>, state: &mut LexerState) -> Result<usize> {
             indent_depth = 0;
         } else if NEWLINE_CHARS.contains(&c0) {
             indent_depth = 0;
-        } else if c0 == indent_char {
-            indent_depth += 1;
         } else if is_white_space(c0) {
-            return Err(Error::InconsistentIndentation(indent_char, c0));
+            match state.indent_char {
+                None => {
+                    state.indent_char = Some(c0);
+                    indent_depth += 1;
+                },
+                Some(indent_char) => if c0 == indent_char {
+                    indent_depth += 1;
+                } else {
+                    return Err(Error::InconsistentIndentation(indent_char, c0));
+                },
+            }
         } else {
             break;
         }
