@@ -118,7 +118,7 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
             let indent_depth = lexer_indent_depth(tokens);
             let t = read_token(tokens)?;
             if t != Token::LParen {
-                return Err(Error::UnexpectedToken(Some(t)));
+                return Err(Error::UnexpectedToken(t));
             }
             let mut clauses = Vec::new();
             loop {
@@ -154,7 +154,7 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
             }
             uexpr_from_clauses(&keyword, &clauses)?
         },
-        t => return Err(Error::UnexpectedToken(Some(t))),
+        t => return Err(Error::UnexpectedToken(t)),
     };
     Ok(Expr(uexpr, read_type_signature(tokens)?))
 }
@@ -286,7 +286,7 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) ->
     if past_indent {
         match read_token(tokens)? {
             Token::RIndent => (),
-            t => return Err(Error::UnexpectedToken(Some(t))),
+            t => return Err(Error::UnexpectedToken(t)),
         }
     }
     Ok(clauses)
@@ -342,7 +342,7 @@ fn read_bracketed_list<T>(
 ) -> Result<T>) -> Result<Vec<T>> {
     let t = read_token(tokens)?;
     if !is_left(&t) {
-        return Err(Error::UnexpectedToken(Some(t)));
+        return Err(Error::UnexpectedToken(t));
     }
     read_bracketed_list_r(tokens, is_right, read_element)
 }
@@ -385,11 +385,11 @@ fn read_type(tokens: &mut Tokens) -> Result<Type> {
             let ret = read_type(tokens)?;
             let right = read_token(tokens)?;
             if right != Token::RParen {
-                return Err(Error::UnexpectedToken(Some(right)));
+                return Err(Error::UnexpectedToken(right));
             }
             Type::Function(params, Box::new(ret))
         },
-        t => return Err(Error::UnexpectedToken(Some(t))),
+        t => return Err(Error::UnexpectedToken(t)),
     })
 }
 

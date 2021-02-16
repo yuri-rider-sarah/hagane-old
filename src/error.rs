@@ -4,7 +4,7 @@ use crate::parser::Type;
 #[derive(Debug)]
 pub enum Error {
     UnexpectedChar(Option<char>),
-    UnexpectedToken(Option<Token>),
+    UnexpectedToken(Token),
     InvalidExpr,
     UnboundVariable(String),
     UnboundType(String),
