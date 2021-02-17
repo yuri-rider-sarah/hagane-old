@@ -117,6 +117,21 @@ unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
         LLVMBuildStore(context.builder, function_value(func, llvm_type, context), ptr);
         context.names.push(("print".to_string(), ptr, func_type));
     }
+    {
+        let parent = LLVMGetInsertBlock(context.builder);
+        let func_c_name = CString::new("read").unwrap();
+        let llvm_c_func_type = LLVMFunctionType(LLVMInt64Type(), std::ptr::null_mut(), 0, 0);
+        let c_func = LLVMAddFunction(context.module, func_c_name.as_ptr(), llvm_c_func_type);
+        let func = create_function(context, "read", &Vec::new(), &Type::Named("Int".to_string()))?;
+        let ret_val = LLVMBuildCall(context.builder, c_func, std::ptr::null_mut(), 0, &0);
+        LLVMBuildRet(context.builder, ret_val);
+        LLVMPositionBuilderAtEnd(context.builder, parent);
+        let func_type = Type::Function(Vec::new(), Box::new(Type::Named("Int".to_string())));
+        let llvm_type = get_llvm_type(&func_type)?;
+        let ptr = LLVMBuildMalloc(context.builder, llvm_type, &0);
+        LLVMBuildStore(context.builder, function_value(func, llvm_type, context), ptr);
+        context.names.push(("read".to_string(), ptr, func_type));
+    }
     Ok(())
 }
 
