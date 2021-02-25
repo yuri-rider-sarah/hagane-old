@@ -61,3 +61,4 @@ test!(block_expr_in_braces, "1");
 test!(first_indent, "1");
 test!(comment, "1\n1");
 test!(tab_indent, "1");
+test!(function_type, "1");

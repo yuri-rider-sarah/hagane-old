@@ -171,6 +171,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             }
             (tuple, type_)
         },
+        Function(_, _) => return Err(Error::InvalidExpr),
         Call(func, args) => {
             let (func_val, func_type) = codegen(func, context)?;
             let (mut arg_values, arg_types) = codegen_group(args, context)?;

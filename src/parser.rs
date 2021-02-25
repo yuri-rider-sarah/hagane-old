@@ -6,6 +6,7 @@ pub enum UExpr {
     IntLiteral(i64),
     Ident(String),
     Tuple(Vec<Expr>),
+    Function(Vec<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Let(Box<Expr>, Vec<Expr>),
     Set(Box<Expr>, Vec<Expr>),
@@ -114,6 +115,15 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
         Token::IntLiteral(n) => UExpr::IntLiteral(n),
         Token::Ident(n) => UExpr::Ident(n),
         Token::Hash => UExpr::Tuple(read_arg_list(tokens)?),
+        Token::DoubleDagger => {
+            let params = read_arg_list_c(tokens)?;
+            let ret = read_expr(tokens)?;
+            let right = read_token(tokens)?;
+            if right != Token::RParen {
+                return Err(Error::UnexpectedToken(right));
+            }
+            UExpr::Function(params, Box::new(ret))
+        }
         Token::PriKeyword(keyword) => {
             let indent_depth = lexer_indent_depth(tokens);
             let t = read_token(tokens)?;
@@ -363,40 +373,43 @@ fn read_arg_list_r(tokens: &mut Tokens) -> Result<Vec<Expr>> {
     read_bracketed_list_r(tokens, |t| *t == Token::RParen, read_expr)
 }
 
+fn read_arg_list_c(tokens: &mut Tokens) -> Result<Vec<Expr>> {
+    read_bracketed_list(tokens, |t| *t == Token::LParen, |t| *t == Token::Colon, read_expr)
+}
+
+fn expr_to_type(Expr(uexpr, type_): Expr) -> Result<Type> {
+    if type_ != None {
+        return Err(Error::InvalidType(Expr(uexpr, type_)));
+    }
+    Ok(match uexpr {
+        UExpr::Ident(name) => Type::Named(name),
+        UExpr::Tuple(type_exprs) => {
+            let mut types = Vec::new();
+            for type_expr in type_exprs {
+                types.push(expr_to_type(type_expr)?);
+            }
+            Type::Tuple(types)
+        },
+        UExpr::Function(param_exprs, result_expr) => {
+            let mut params = Vec::new();
+            for param_expr in param_exprs {
+                params.push(expr_to_type(param_expr)?);
+            }
+            Type::Function(params, Box::new(expr_to_type(*result_expr)?))
+        },
+        _ => return Err(Error::InvalidType(Expr(uexpr, type_))),
+    })
+}
+
 fn read_type_signature(tokens: &mut Tokens) -> Result<Option<Type>> {
     let state = get_lexer_state(tokens);
     Ok(match read_token(tokens)? {
         Token::Apostrophe => {
-            Some(read_type(tokens)?)
+            Some(expr_to_type(read_expr(tokens)?)?)
         },
         _ => {
             restore_lexer_state(tokens, state);
             None
         },
     })
-}
-
-fn read_type(tokens: &mut Tokens) -> Result<Type> {
-    Ok(match read_token(tokens)? {
-        Token::Ident(name) => Type::Named(name),
-        Token::Hash => Type::Tuple(read_func_type_param_list(tokens)?),
-        Token::LParen => {
-            let params = read_func_type_param_list_rc(tokens)?;
-            let ret = read_type(tokens)?;
-            let right = read_token(tokens)?;
-            if right != Token::RParen {
-                return Err(Error::UnexpectedToken(right));
-            }
-            Type::Function(params, Box::new(ret))
-        },
-        t => return Err(Error::UnexpectedToken(t)),
-    })
-}
-
-fn read_func_type_param_list(tokens: &mut Tokens) -> Result<Vec<Type>> {
-    read_bracketed_list(tokens, |t| *t == Token::LParen, |t| *t == Token::RParen, read_type)
-}
-
-fn read_func_type_param_list_rc(tokens: &mut Tokens) -> Result<Vec<Type>> {
-    read_bracketed_list_r(tokens, |t| *t == Token::Colon, read_type)
 }

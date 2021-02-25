@@ -1,4 +1,5 @@
 use crate::lexer::Token;
+use crate::parser::Expr;
 use crate::parser::Type;
 
 #[derive(Debug)]
@@ -15,7 +16,7 @@ pub enum Error {
     NotAFunction(Type),
     AssignToExpr,
     InconsistentIndentation(char, char),
-    Unimplemented,
+    InvalidType(Expr),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

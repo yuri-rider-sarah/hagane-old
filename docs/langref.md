@@ -45,7 +45,7 @@ Nonempty tuples are useless in the current version, as there is no way to decons
 
 ### 2.3. Function types
 ```
-(<type_1> ... <type_n> : <type_ret>)
+‡(<type_1> ... <type_n> : <type_ret>)
 ```
 This is the type of a function taking n arguments of types `<type_1>` through `<type_n>` and returning a value of type `<type_ret>`.
 
