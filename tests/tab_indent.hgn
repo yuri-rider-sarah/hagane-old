@@ -1,4 +1,4 @@
-let. x 0
+let. mut, x 0
 if. =(x 1)
 	set. x 3
 	print(2)

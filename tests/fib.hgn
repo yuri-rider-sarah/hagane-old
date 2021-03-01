@@ -1,12 +1,13 @@
-let. fib λ.{n 'Int} n 'Int
+let. mut, fib λ.{n 'Int} n 'Int
 set. fib λ.{n 'Int}
-    let. a 0
-    let. b 1
-    while. >(n 0)
+    let. mut, a 0
+    let. mut, b 1
+    let. mut, i 0
+    while. <(i n)
         let. t +(a b)
         set. a b
         set. b t
-        set. n -(n 1)
+        set. i +(i 1)
     a 'Int
 
 print(fib(92))

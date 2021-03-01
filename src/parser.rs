@@ -8,7 +8,7 @@ pub enum UExpr {
     Tuple(Vec<Expr>),
     Function(Vec<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
-    Let(Box<Expr>, Vec<Expr>),
+    Let(Box<Expr>, Vec<Expr>, bool),
     Set(Box<Expr>, Vec<Expr>),
     If(Vec<Expr>, Vec<Expr>, Vec<Expr>),
     While(Vec<Expr>, Vec<Expr>),
@@ -54,7 +54,11 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
     Ok(match &keyword[..] {
         "let" => match &clauses[..] {
             [Block(var), Block(val)] => match &var[..] {
-                [var] => UExpr::Let(Box::new(var.clone()), val.clone()),
+                [var] => UExpr::Let(Box::new(var.clone()), val.clone(), false),
+                _ => return Err(Error::InvalidExpr),
+            },
+            [SecKeyword(mut_kw), Block(var), Block(val)] if mut_kw == "mut" => match &var[..] {
+                [var] => UExpr::Let(Box::new(var.clone()), val.clone(), true),
                 _ => return Err(Error::InvalidExpr),
             },
             _ => return Err(Error::InvalidExpr),
