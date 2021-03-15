@@ -23,9 +23,9 @@ struct Context {
     names: Vec<(String, Var, Type)>
 }
 
-unsafe fn create_function(context: &mut Context, name: &str, param_types: &Vec<Type>, ret_type: &Type) -> Result<LLVMValueRef> {
+unsafe fn create_function(context: &mut Context, name: &str, params_num: usize) -> Result<LLVMValueRef> {
     let func_c_name = CString::new(name).unwrap();
-    let func = LLVMAddFunction(context.module, func_c_name.as_ptr(), get_llvm_function_type(param_types, ret_type)?);
+    let func = LLVMAddFunction(context.module, func_c_name.as_ptr(), get_llvm_function_type(params_num));
     LLVMSetLinkage(func, LLVMLinkage::LLVMPrivateLinkage);
     LLVMSetFunctionCallConv(func, LLVMCallConv::LLVMFastCallConv as u32);
     let entry = LLVMAppendBasicBlock(func, ENTRY_C_NAME);
@@ -44,66 +44,165 @@ unsafe fn function_value(func: LLVMValueRef, func_type: &Type, context: &mut Con
                 0,
                 &0,
             ),
-            LLVMConstNull(LLVMPointerType(LLVMInt8Type(), 0)),
+            LLVMConstNull(void_ptr_type()),
             1,
             &0,
         ),
         val,
     );
-    Ok(val)
+    Ok(codegen_to_void_ptr(val, context))
 }
 
-unsafe fn codegen_bool_constant_primitive(name: &str, n: u64, context: &mut Context) -> Result<()> {
-    let type_ = Type::Named("Bool".to_string());
+unsafe fn codegen_box(val: LLVMValueRef, llvm_type: LLVMTypeRef, context: &mut Context) -> LLVMValueRef {
+    let ptr = LLVMBuildMalloc(context.builder, llvm_type, &0);
+    LLVMBuildStore(context.builder, val, ptr);
+    codegen_to_void_ptr(ptr, context)
+}
+
+unsafe fn codegen_copy_loop(
+    src: LLVMValueRef,
+    dest: LLVMValueRef,
+    length: LLVMValueRef,
+    func: LLVMValueRef,
+    context: &mut Context
+) {
+    let mut entry_block = LLVMGetInsertBlock(context.builder);
+    let test_block = LLVMAppendBasicBlock(func, BB_C_NAME);
+    let mut loop_block = LLVMAppendBasicBlock(func, BB_C_NAME);
+    let after_block = LLVMAppendBasicBlock(func, BB_C_NAME);
+    LLVMBuildBr(context.builder, test_block);
+    LLVMPositionBuilderAtEnd(context.builder, test_block);
+    let mut i = LLVMBuildPhi(context.builder, LLVMInt64Type(), &0);
+    LLVMBuildCondBr(context.builder,
+        LLVMBuildICmp(context.builder, LLVMIntULT, i, length, &0),
+        loop_block,
+        after_block,
+    );
+    LLVMPositionBuilderAtEnd(context.builder, loop_block);
+    LLVMBuildStore(context.builder,
+        LLVMBuildLoad(context.builder, LLVMBuildGEP(context.builder, src, &mut i, 1, &0), &0),
+        LLVMBuildGEP(context.builder, dest, &mut i, 1, &0),
+    );
+    let mut i1 = LLVMBuildAdd(context.builder, i, LLVMConstInt(LLVMInt64Type(), 1, 0), &0);
+    LLVMAddIncoming(i, &mut LLVMConstInt(LLVMInt64Type(), 0, 0), &mut entry_block, 1);
+    LLVMAddIncoming(i, &mut i1, &mut loop_block, 1);
+    LLVMBuildBr(context.builder, test_block);
+    LLVMPositionBuilderAtEnd(context.builder, after_block);
+}
+
+unsafe fn codegen_decompose_list(list: LLVMValueRef, context: &mut Context) -> (LLVMValueRef, LLVMValueRef) {
+    (LLVMBuildExtractValue(context.builder, list, 0, &0), LLVMBuildExtractValue(context.builder, list, 1, &0))
+}
+
+unsafe fn codegen_compose_list(
+    length: LLVMValueRef,
+    contents: LLVMValueRef,
+    context: &mut Context
+) -> LLVMValueRef {
+    LLVMBuildInsertValue(context.builder,
+        LLVMBuildInsertValue(context.builder,
+            LLVMGetUndef(list_type()),
+            length,
+            0,
+            &0,
+        ),
+        contents,
+        1,
+        &0,
+    )
+}
+
+unsafe fn codegen_primitive<F>(
+    name: &str,
+    type_params: Option<Vec<String>>,
+    type_: Type,
+    build: F,
+    context: &mut Context,
+) -> Result<()> where F: Fn(&mut Context) -> Result<LLVMValueRef> {
     let val = LLVMBuildMalloc(context.builder, get_unboxed_llvm_type(&type_)?, &0);
-    LLVMBuildStore(context.builder, LLVMConstInt(LLVMInt1Type(), n, 0), val);
+    LLVMBuildStore(context.builder, build(context)?, val);
+    let type_ = match type_params {
+        None => type_,
+        Some(type_params) => Type::Forall(type_params, Box::new(type_)),
+    };
+    let var = Var::Const(codegen_to_void_ptr(val, context));
+    context.names.push((name.to_string(), var, type_));
+    Ok(())
+}
+
+unsafe fn codegen_primitive_function<F>(
+    name: &str,
+    type_params: Option<Vec<String>>,
+    param_types: Vec<Type>,
+    ret_type: Type,
+    build: F,
+    context: &mut Context,
+) -> Result<()> where F: Fn(LLVMValueRef, &mut Context) -> Result<LLVMValueRef> {
+    let parent = LLVMGetInsertBlock(context.builder);
+    let func = create_function(context, &name, param_types.len())?;
+    LLVMBuildRet(context.builder, build(func, context)?);
+    LLVMPositionBuilderAtEnd(context.builder, parent);
+    let func_type = Type::Function(param_types, Box::new(ret_type));
+    let val = function_value(func, &func_type, context)?;
+    let type_ = match type_params {
+        None => func_type,
+        Some(type_params) => Type::Forall(type_params, Box::new(func_type)),
+    };
     context.names.push((name.to_string(), Var::Const(val), type_));
     Ok(())
 }
 
-unsafe fn codegen_binary_arith_primitive(name: &str, build: unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMValueRef, *const i8) -> LLVMValueRef, context: &mut Context) -> Result<()> {
-    let parent = LLVMGetInsertBlock(context.builder);
-    let param_types = vec![Type::Named("Int".to_string()), Type::Named("Int".to_string())];
-    let ret_type = Type::Named("Int".to_string());
-    let func = create_function(context, &name, &param_types, &ret_type)?;
-    let ret_val = LLVMBuildMalloc(context.builder, get_unboxed_llvm_type(&ret_type)?, &0);
-    LLVMBuildStore(context.builder,
-        build(context.builder,
-            LLVMBuildLoad(context.builder, LLVMGetParam(func, 0), &0),
-            LLVMBuildLoad(context.builder, LLVMGetParam(func, 1), &0),
-            &0,
-        ),
-        ret_val,
-    );
-    LLVMBuildRet(context.builder, ret_val);
-    LLVMPositionBuilderAtEnd(context.builder, parent);
-    let func_type = Type::Function(param_types, Box::new(ret_type));
-    let val = function_value(func, &func_type, context)?;
-    context.names.push((name.to_string(), Var::Const(val), func_type));
-    Ok(())
+unsafe fn codegen_bool_constant_primitive(name: &str, n: u64, context: &mut Context) -> Result<()> {
+    codegen_primitive(
+        name,
+        None,
+        Type::Named("Bool".to_string()),
+        |_| Ok(LLVMConstInt(LLVMInt1Type(), n, 0)),
+        context,
+    )
+}
+
+unsafe fn codegen_binary_arith_primitive(
+    name: &str, 
+    build: unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMValueRef, *const i8) -> LLVMValueRef,
+    context: &mut Context
+) -> Result<()> {
+    codegen_primitive_function(
+        name,
+        None,
+        vec![Type::Named("Int".to_string()), Type::Named("Int".to_string())],
+        Type::Named("Int".to_string()),
+        |func, context| Ok(codegen_box(
+            build(context.builder,
+                codegen_load(LLVMGetParam(func, 0), LLVMInt64Type(), context),
+                codegen_load(LLVMGetParam(func, 1), LLVMInt64Type(), context),
+                &0,
+            ),
+            LLVMInt64Type(),
+            context,
+        )),
+        context,
+    )
 }
 
 unsafe fn codegen_binary_cmp_primitive(name: &str, cmp: LLVMIntPredicate, context: &mut Context) -> Result<()> {
-    let parent = LLVMGetInsertBlock(context.builder);
-    let param_types = vec![Type::Named("Int".to_string()), Type::Named("Int".to_string())];
-    let ret_type = Type::Named("Bool".to_string());
-    let func = create_function(context, &name, &param_types, &ret_type)?;
-    let ret_val = LLVMBuildMalloc(context.builder, get_unboxed_llvm_type(&ret_type)?, &0);
-    LLVMBuildStore(context.builder,
-        LLVMBuildICmp(context.builder,
-            cmp,
-            LLVMBuildLoad(context.builder, LLVMGetParam(func, 0), &0),
-            LLVMBuildLoad(context.builder, LLVMGetParam(func, 1), &0),
-            &0,
-        ),
-        ret_val,
-    );
-    LLVMBuildRet(context.builder, ret_val);
-    LLVMPositionBuilderAtEnd(context.builder, parent);
-    let func_type = Type::Function(param_types, Box::new(ret_type));
-    let val = function_value(func, &func_type, context)?;
-    context.names.push((name.to_string(), Var::Const(val), func_type));
-    Ok(())
+    codegen_primitive_function(
+        name,
+        None,
+        vec![Type::Named("Int".to_string()), Type::Named("Int".to_string())],
+        Type::Named("Bool".to_string()),
+        |func, context| Ok(codegen_box(
+            LLVMBuildICmp(context.builder,
+                cmp,
+                codegen_load(LLVMGetParam(func, 0), LLVMInt64Type(), context),
+                codegen_load(LLVMGetParam(func, 1), LLVMInt64Type(), context),
+                &0,
+            ),
+            LLVMInt1Type(),
+            context,
+        )),
+        context,
+    )
 }
 
 unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
@@ -120,37 +219,147 @@ unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
     codegen_binary_cmp_primitive("≤", LLVMIntSLE, context)?;
     codegen_binary_cmp_primitive(">", LLVMIntSGT, context)?;
     codegen_binary_cmp_primitive("≥", LLVMIntSGE, context)?;
-    {
-        let parent = LLVMGetInsertBlock(context.builder);
-        let func_c_name = CString::new("print").unwrap();
+    let print_c_func = {
+        let c_func_name = CString::new("print").unwrap();
         let mut func_param_types = vec![LLVMInt64Type()];
-        let param_types = vec![Type::Named("Int".to_string())];
         let llvm_c_func_type = LLVMFunctionType(LLVMVoidType(), func_param_types.as_mut_ptr(), func_param_types.len() as u32, 0);
-        let c_func = LLVMAddFunction(context.module, func_c_name.as_ptr(), llvm_c_func_type);
-        let func = create_function(context, "print", &param_types, &Type::Tuple(Vec::new()))?;
-        let mut args = vec![LLVMBuildLoad(context.builder, LLVMGetParam(func, 0), &0)];
-        LLVMBuildCall(context.builder, c_func, args.as_mut_ptr(), args.len() as u32, &0);
-        LLVMBuildRet(context.builder, codegen_unit(context).0);
-        LLVMPositionBuilderAtEnd(context.builder, parent);
-        let func_type = Type::Function(param_types, Box::new(Type::Tuple(Vec::new())));
-        let val = function_value(func, &func_type, context)?;
-        context.names.push(("print".to_string(), Var::Const(val), func_type));
-    }
-    {
-        let parent = LLVMGetInsertBlock(context.builder);
-        let func_c_name = CString::new("read").unwrap();
+        LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
+    };
+    codegen_primitive_function(
+        "print",
+        None,
+        vec![Type::Named("Int".to_string())],
+        Type::Tuple(Vec::new()),
+        |func, context| {
+            let mut args = vec![codegen_load(LLVMGetParam(func, 0), LLVMInt64Type(), context)];
+            LLVMBuildCall(context.builder, print_c_func, args.as_mut_ptr(), args.len() as u32, &0);
+            Ok(codegen_box(LLVMGetUndef(unit_type()), unit_type(), context))
+        },
+        context,
+    )?;
+    let read_c_func = {
+        let c_func_name = CString::new("read").unwrap();
         let llvm_c_func_type = LLVMFunctionType(LLVMInt64Type(), std::ptr::null_mut(), 0, 0);
-        let c_func = LLVMAddFunction(context.module, func_c_name.as_ptr(), llvm_c_func_type);
-        let ret_type = Type::Named("Int".to_string());
-        let func = create_function(context, "read", &Vec::new(), &ret_type)?;
-        let ret_val = LLVMBuildMalloc(context.builder, get_unboxed_llvm_type(&ret_type)?, &0);
-        LLVMBuildStore(context.builder, LLVMBuildCall(context.builder, c_func, std::ptr::null_mut(), 0, &0), ret_val);
-        LLVMBuildRet(context.builder, ret_val);
-        LLVMPositionBuilderAtEnd(context.builder, parent);
-        let func_type = Type::Function(Vec::new(), Box::new(Type::Named("Int".to_string())));
-        let val = function_value(func, &func_type, context)?;
-        context.names.push(("read".to_string(), Var::Const(val), func_type));
-    }
+        LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
+    };
+    codegen_primitive_function(
+        "read",
+        None,
+        vec![],
+        Type::Named("Int".to_string()),
+        |_, context| Ok(codegen_box(LLVMBuildCall(context.builder, read_c_func, std::ptr::null_mut(), 0, &0), LLVMInt64Type(), context)),
+        context,
+    )?;
+    codegen_primitive(
+        "empty",
+        Some(vec!["T".to_string()]),
+        Type::Applied(Box::new(Type::Named("List".to_string())), vec![Type::Named("T".to_string())]),
+        |context| Ok(LLVMBuildInsertValue(context.builder,
+            LLVMBuildInsertValue(context.builder,
+                LLVMGetUndef(list_type()),
+                LLVMConstInt(LLVMInt64Type(), 0, 0),
+                0,
+                &0,
+            ),
+            LLVMConstNull(void_ptr_type()),
+            1,
+            &0,
+        )),
+        context,
+    )?;
+    let list_t_type = Type::Applied(Box::new(Type::Named("List".to_string())), vec![Type::Named("T".to_string())]);
+    codegen_primitive_function(
+        "len",
+        Some(vec!["T".to_string()]),
+        vec![list_t_type.clone()],
+        Type::Named("Int".to_string()),
+        |func, context| {
+            let length = LLVMBuildExtractValue(context.builder,
+                codegen_load(LLVMGetParam(func, 0), list_type(), context),
+                0,
+                &0,
+            );
+            Ok(codegen_box(length, LLVMInt64Type(), context))
+        },
+        context,
+    )?;
+    codegen_primitive_function(
+        "get",
+        Some(vec!["T".to_string()]),
+        vec![list_t_type.clone(), Type::Named("Int".to_string())],
+        Type::Named("T".to_string()),
+        |func, context| {
+            let (_, contents) = codegen_decompose_list(
+                codegen_load(LLVMGetParam(func, 0), list_type(), context),
+                context,
+            );
+            let mut i = codegen_load(LLVMGetParam(func, 1), LLVMInt64Type(), context);
+            Ok(LLVMBuildLoad(context.builder,
+                LLVMBuildGEP(context.builder, contents, &mut i, 1, &0),
+                &0,
+            ))
+        },
+        context,
+    )?;
+    codegen_primitive_function(
+        "put",
+        Some(vec!["T".to_string()]),
+        vec![list_t_type.clone(), Type::Named("Int".to_string()), Type::Named("T".to_string())],
+        list_t_type.clone(),
+        |func, context| {
+            let (length, old_contents) = codegen_decompose_list(
+                codegen_load(LLVMGetParam(func, 0), list_type(), context),
+                context,
+            );
+            let mut i = codegen_load(LLVMGetParam(func, 1), LLVMInt64Type(), context);
+            let contents = LLVMBuildArrayMalloc(context.builder, void_ptr_type(), length, &0);
+            codegen_copy_loop(old_contents, contents, length, func, context);
+            LLVMBuildStore(context.builder,
+                LLVMGetParam(func, 2),
+                LLVMBuildGEP(context.builder, contents, &mut i, 1, &0),
+            );
+            Ok(codegen_box(codegen_compose_list(length, contents, context), list_type(), context))
+        },
+        context,
+    )?;
+    codegen_primitive_function(
+        "push",
+        Some(vec!["T".to_string()]),
+        vec![list_t_type.clone(), Type::Named("T".to_string())],
+        list_t_type.clone(),
+        |func, context| {
+            let (mut old_length, old_contents) = codegen_decompose_list(
+                codegen_load(LLVMGetParam(func, 0), list_type(), context),
+                context,
+            );
+            let length = LLVMBuildAdd(context.builder, old_length, LLVMConstInt(LLVMInt64Type(), 1, 0), &0);
+            let contents = LLVMBuildArrayMalloc(context.builder, void_ptr_type(), length, &0);
+            codegen_copy_loop(old_contents, contents, old_length, func, context);
+            LLVMBuildStore(context.builder,
+                LLVMGetParam(func, 1),
+                LLVMBuildGEP(context.builder, contents, &mut old_length, 1, &0),
+            );
+            Ok(codegen_box(codegen_compose_list(length, contents, context), list_type(), context))
+        },
+        context,
+    )?;
+    codegen_primitive_function(
+        "pop",
+        Some(vec!["T".to_string()]),
+        vec![list_t_type.clone()],
+        list_t_type.clone(),
+        |func, context| {
+            let (old_length, old_contents) = codegen_decompose_list(
+                codegen_load(LLVMGetParam(func, 0), list_type(), context),
+                context,
+            );
+            let length = LLVMBuildSub(context.builder, old_length, LLVMConstInt(LLVMInt64Type(), 1, 0), &0);
+            let contents = LLVMBuildArrayMalloc(context.builder, void_ptr_type(), length, &0);
+            codegen_copy_loop(old_contents, contents, length, func, context);
+            Ok(codegen_box(codegen_compose_list(length, contents, context), list_type(), context))
+        },
+        context,
+    )?;
     Ok(())
 }
 
@@ -179,7 +388,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let type_ = Type::Named("Int".to_string());
             let val = LLVMBuildMalloc(context.builder, get_unboxed_llvm_type(&type_)?, &0);
             LLVMBuildStore(context.builder, LLVMConstInt(LLVMInt64Type(), *n as u64, 0), val);
-            (val, type_)
+            (codegen_to_void_ptr(val, context), type_)
         },
         Ident(name) => {
             let (var, type_) = resolve_name(&context.names, name)?;
@@ -193,17 +402,17 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let type_ = Type::Tuple(types);
             let tuple = LLVMBuildMalloc(context.builder, get_unboxed_llvm_type(&type_)?, &0);
             for (i, &element) in values.iter().enumerate() {
-                let mut indices = vec![LLVMConstInt(LLVMInt32Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
+                let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
                 let ptr = LLVMBuildGEP(context.builder, tuple, indices.as_mut_ptr(), indices.len() as u32, &0);
                 LLVMBuildStore(context.builder, element, ptr);
             }
-            (tuple, type_)
+            (codegen_to_void_ptr(tuple, context), type_)
         },
         Function(_, _) => return Err(Error::InvalidExpr),
         Call(func, args) => {
-            let (func_val, func_type) = codegen(func, context)?;
+            let (func_val_ptr, func_type) = codegen(func, context)?;
             let (mut arg_values, arg_types) = codegen_group(args, context)?;
-            let ret_type = match func_type {
+            let ret_type = match func_type.clone() {
                 Type::Function(param_types, ret_type) => if param_types == arg_types {
                     *ret_type
                 } else {
@@ -211,12 +420,36 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 },
                 _ => return Err(Error::NotAFunction(func_type)),
             };
-            let func_val = LLVMBuildLoad(context.builder, func_val, &0);
+            let func_val = codegen_load(func_val_ptr, get_unboxed_llvm_type(&func_type)?, context);
             let func_ptr = LLVMBuildExtractValue(context.builder, func_val, 0, &0);
             arg_values.push(LLVMBuildExtractValue(context.builder, func_val, 1, &0));
             let call = LLVMBuildCall(context.builder, func_ptr, arg_values.as_mut_ptr(), arg_values.len() as u32, &0);
             LLVMSetInstructionCallConv(call, LLVMCallConv::LLVMFastCallConv as u32);
             (call, ret_type)
+        },
+        Monomorphic(expr, args) => {
+            let Expr(uexpr, stated_type) = &**expr;
+            match uexpr {
+                Ident(name) => {
+                    let (var, name_type) = resolve_name(&context.names, name)?;
+                    check_type_compat(stated_type, &name_type)?;
+                    let type_ = match name_type {
+                        Type::Forall(params, name_type) => {
+                            if params.len() != args.len() {
+                                return Err(Error::MismatchedTypeArgsNum(params.len(), args.len()));
+                            }
+                            let substitutions = Iterator::zip(params.clone().into_iter(), args.clone().into_iter()).collect();
+                            substitute_in_type(&*name_type, &substitutions)
+                        },
+                        _ => Type::Applied(Box::new(name_type), args.clone()),
+                    };
+                    (match var {
+                        Var::Const(val) => val,
+                        Var::Mut(ptr) => LLVMBuildLoad(context.builder, ptr, &0),
+                    }, type_)
+                },
+                _ => return Err(Error::NotPolymorphic),
+            }
         },
         Let(name, exprs, false) => match &**name {
             Expr(Ident(name), stated_type) => {
@@ -232,9 +465,10 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 let (value, type_) = codegen_block(exprs, context)?;
                 check_type_compat(stated_type, &type_)?;
                 let c_name = CString::new(&name[..]).unwrap();
-                let ptr = LLVMBuildMalloc(context.builder, get_llvm_type(&type_)?, c_name.as_ptr());
+                let ptr = LLVMBuildMalloc(context.builder, void_ptr_type(), c_name.as_ptr());
                 LLVMBuildStore(context.builder, value, ptr);
-                context.names.push((name.clone(), Var::Mut(ptr), type_));
+                let var = Var::Mut(ptr);
+                context.names.push((name.clone(), var, type_));
                 codegen_unit(context)
             },
             _ => return Err(Error::AssignToExpr),
@@ -256,11 +490,11 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             _ => return Err(Error::AssignToExpr),
         },
         If(cond, then, else_) => {
-            let (cond_val, cond_type) = codegen_block(cond, context)?;
+            let (cond_val_ptr, cond_type) = codegen_block(cond, context)?;
             if cond_type != Type::Named("Bool".to_string()) {
                 return Err(Error::ConflictingType(cond_type, Type::Named("Bool".to_string())));
             }
-            let cond_val = LLVMBuildLoad(context.builder, cond_val, &0);
+            let cond_val = codegen_load(cond_val_ptr, LLVMInt1Type(), context);
             let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
             let parent_block = LLVMGetInsertBlock(context.builder);
             let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
@@ -282,7 +516,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             LLVMPositionBuilderAtEnd(context.builder, else_end);
             LLVMBuildBr(context.builder, merge_block);
             LLVMPositionBuilderAtEnd(context.builder, merge_block);
-            let phi = LLVMBuildPhi(context.builder, get_llvm_type(&then_type)?, &0);
+            let phi = LLVMBuildPhi(context.builder, void_ptr_type(), &0);
             LLVMAddIncoming(phi, &mut then_val, &mut then_end, 1);
             LLVMAddIncoming(phi, &mut else_val, &mut else_end, 1);
             (phi, then_type)
@@ -292,11 +526,11 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let cond_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMBuildBr(context.builder, cond_block);
             LLVMPositionBuilderAtEnd(context.builder, cond_block);
-            let (cond_val, cond_type) = codegen_block(cond, context)?;
+            let (cond_val_ptr, cond_type) = codegen_block(cond, context)?;
             if cond_type != Type::Named("Bool".to_string()) {
                 return Err(Error::ConflictingType(cond_type, Type::Named("Bool".to_string())));
             }
-            let cond_val = LLVMBuildLoad(context.builder, cond_val, &0);
+            let cond_val = codegen_load(cond_val_ptr, LLVMInt1Type(), context);
             let body_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, body_block);
             let _ = codegen_block(body, context)?;
@@ -338,13 +572,13 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 },
             };
             let mut captures_types = Vec::new();
-            for (_, var, type_) in &context.names {
+            for (_, var, _) in &context.names {
                 captures_types.push(match var {
-                    Var::Const(_) => get_llvm_type(type_)?,
-                    Var::Mut(_) => LLVMPointerType(get_llvm_type(type_)?, 0),
+                    Var::Const(_) => void_ptr_type(),
+                    Var::Mut(_) => LLVMPointerType(void_ptr_type(), 0),
                 });
             }
-            let func = create_function(context, "lambda", &param_types, &ret_type)?;
+            let func = create_function(context, "lambda", param_types.len())?;
             let captures_type = LLVMStructType(
                 captures_types.as_mut_ptr(),
                 captures_types.len() as u32,
@@ -358,7 +592,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             );
             let mut inner_names: Vec<_> = context.names.iter().enumerate().map(|(i, (name, var, type_))| {
                 let c_name = CString::new(&name[..]).unwrap();
-                let mut indices = vec![LLVMConstInt(LLVMInt32Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
+                let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
                 let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, c_name.as_ptr());
                 let val = LLVMBuildLoad(context.builder, ptr, c_name.as_ptr());
                 (name.clone(), match var {
@@ -384,7 +618,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             LLVMPositionBuilderAtEnd(context.builder, parent);
             let captures = LLVMBuildMalloc(context.builder, captures_type, &0);
             for (i, (_, var, _)) in context.names.iter().enumerate() {
-                let mut indices = vec![LLVMConstInt(LLVMInt32Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
+                let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
                 let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, &0);
                 LLVMBuildStore(context.builder, match var {
                     Var::Const(val) => *val,
@@ -402,17 +636,13 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                         0,
                         &0,
                     ),
-                    LLVMBuildBitCast(context.builder,
-                        captures,
-                        LLVMPointerType(LLVMInt8Type(), 0),
-                        &0,
-                    ),
+                    codegen_to_void_ptr(captures, context),
                     1,
                     &0,
                 ),
                 func_val,
             );
-            (func_val, type_)
+            (codegen_to_void_ptr(func_val, context), type_)
         },
     };
     check_type_compat(stated_type, &inferred_type)?;
@@ -440,8 +670,16 @@ unsafe fn codegen_block(exprs: &Vec<Expr>, context: &mut Context) -> Result<(LLV
     Ok(result)
 }
 
+unsafe fn codegen_to_void_ptr(val: LLVMValueRef, context: &mut Context) -> LLVMValueRef {
+    LLVMBuildBitCast(context.builder, val, LLVMPointerType(LLVMInt8Type(), 0), &0)
+}
+
 unsafe fn codegen_unit(context: &mut Context) -> (LLVMValueRef, Type) {
-    (LLVMBuildMalloc(context.builder, LLVMStructType(std::ptr::null_mut(), 0, 0), &0), Type::Tuple(Vec::new()))
+    (codegen_to_void_ptr(LLVMBuildMalloc(context.builder, unit_type(), &0), context), Type::Tuple(Vec::new()))
+}
+
+unsafe fn codegen_load(ptr: LLVMValueRef, llvm_type: LLVMTypeRef, context: &mut Context) -> LLVMValueRef {
+    LLVMBuildLoad(context.builder, LLVMBuildBitCast(context.builder, ptr, LLVMPointerType(llvm_type, 0), &0), &0)
 }
 
 fn resolve_name(names: &Vec<(String, Var, Type)>, name: &str) -> Result<(Var, Type)> {
@@ -459,6 +697,26 @@ fn check_type_compat(stated_type: &Option<Type>, inferred_type: &Type) -> Result
     }
 }
 
+unsafe fn unit_type() -> LLVMTypeRef {
+    LLVMStructType(std::ptr::null_mut(), 0, 0)
+}
+
+unsafe fn void_ptr_type() -> LLVMTypeRef {
+    LLVMPointerType(LLVMInt8Type(), 0)
+}
+
+unsafe fn list_type() -> LLVMTypeRef {
+    let mut contents = [
+        LLVMInt64Type(),
+        LLVMPointerType(void_ptr_type(), 0),
+    ];
+    LLVMStructType(
+        contents.as_mut_ptr(),
+        contents.len() as u32,
+        0,
+    )
+}
+
 unsafe fn get_unboxed_llvm_type(type_: &Type) -> Result<LLVMTypeRef> {
     Ok(match type_ {
         Type::Named(name) => match &name[..] {
@@ -468,8 +726,8 @@ unsafe fn get_unboxed_llvm_type(type_: &Type) -> Result<LLVMTypeRef> {
         }
         Type::Tuple(types) => {
             let mut llvm_types = Vec::new();
-            for type_ in types {
-                llvm_types.push(get_llvm_type(type_)?);
+            for _ in types {
+                llvm_types.push(void_ptr_type());
             }
             LLVMStructType(
                 llvm_types.as_mut_ptr(),
@@ -477,10 +735,10 @@ unsafe fn get_unboxed_llvm_type(type_: &Type) -> Result<LLVMTypeRef> {
                 0,
             )
         },
-        Type::Function(params, ret) => {
+        Type::Function(params, _) => {
             let mut contents = [
-                LLVMPointerType(get_llvm_function_type(params, ret)?, 0),
-                LLVMPointerType(LLVMInt8Type(), 0),
+                LLVMPointerType(get_llvm_function_type(params.len()), 0),
+                void_ptr_type(),
             ];
             LLVMStructType(
                 contents.as_mut_ptr(),
@@ -488,23 +746,52 @@ unsafe fn get_unboxed_llvm_type(type_: &Type) -> Result<LLVMTypeRef> {
                 0,
             )
         },
+        Type::Applied(base, args) => match &**base {
+            Type::Named(name) => match &name[..] {
+                "List" => match &args[..] {
+                    [_] => list_type(),
+                    _ => return Err(Error::MismatchedTypeArgsNum(1, args.len())),
+                }
+                _ => return Err(Error::UnboundType(name.clone())),
+            }
+            _ => return Err(Error::NonParametrizableType(type_.clone())),
+        },
+        Type::Forall(_, _) => return Err(Error::AmbiguousType),
     })
 }
 
-unsafe fn get_llvm_type(type_: &Type) -> Result<LLVMTypeRef> {
-    Ok(LLVMPointerType(get_unboxed_llvm_type(type_)?, 0))
-}
-
-unsafe fn get_llvm_function_type(params: &Vec<Type>, ret: &Type) -> Result<LLVMTypeRef> {
-    let mut llvm_types = Vec::new();
-    for type_ in params {
-        llvm_types.push(get_llvm_type(type_)?);
-    }
-    llvm_types.push(LLVMPointerType(LLVMInt8Type(), 0));
-    Ok(LLVMFunctionType(
-        get_llvm_type(ret)?,
+unsafe fn get_llvm_function_type(params: usize) -> LLVMTypeRef {
+    let mut llvm_types = vec![void_ptr_type(); params + 1];
+    LLVMFunctionType(
+        void_ptr_type(),
         llvm_types.as_mut_ptr(),
         llvm_types.len() as u32,
         0,
-    ))
+    )
+}
+
+fn substitute_in_type(type_: &Type, substitutions: &Vec<(String, Type)>) -> Type {
+    match type_ {
+        Type::Named(name) => {
+            for (param, arg) in substitutions {
+                if name == param {
+                    return arg.clone();
+                }
+            }
+            Type::Named(name.clone())
+        },
+        Type::Applied(base, args) => Type::Applied(
+            Box::new(substitute_in_type(base, substitutions)),
+            args.into_iter().map(|type_| substitute_in_type(type_, substitutions)).collect(),
+        ),
+        Type::Tuple(types) => Type::Tuple(types.into_iter().map(|type_| substitute_in_type(type_, substitutions)).collect()),
+        Type::Function(param_types, ret_type) => Type::Function(
+            param_types.into_iter().map(|type_| substitute_in_type(type_, substitutions)).collect(),
+            Box::new(substitute_in_type(ret_type, substitutions))
+        ),
+        Type::Forall(params, base) => {
+            let substitutions_ = substitutions.clone().into_iter().filter(|(param, _)| params.contains(param)).collect();
+            Type::Forall(params.clone(), Box::new(substitute_in_type(base, &substitutions_)))
+        },
+    }
 }

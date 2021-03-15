@@ -8,6 +8,7 @@ pub enum UExpr {
     Tuple(Vec<Expr>),
     Function(Vec<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
+    Monomorphic(Box<Expr>, Vec<Type>),
     Let(Box<Expr>, Vec<Expr>, bool),
     Set(Box<Expr>, Vec<Expr>),
     If(Vec<Expr>, Vec<Expr>, Vec<Expr>),
@@ -22,8 +23,10 @@ pub struct Expr(pub UExpr, pub Option<Type>);
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Named(String),
+    Applied(Box<Type>, Vec<Type>),
     Tuple(Vec<Type>),
     Function(Vec<Type>, Box<Type>),
+    Forall(Vec<String>, Box<Type>),
 }
 
 fn read_expr(tokens: &mut Tokens) -> Result<Expr> {
@@ -33,6 +36,10 @@ fn read_expr(tokens: &mut Tokens) -> Result<Expr> {
         match read_token(tokens)? {
             Token::LParen => expr = Expr(
                 UExpr::Call(Box::new(expr), read_arg_list_r(tokens)?),
+                read_type_signature(tokens)?,
+            ),
+            Token::LBracket => expr = Expr(
+                UExpr::Monomorphic(Box::new(expr), read_type_param_list_r(tokens)?),
                 read_type_signature(tokens)?,
             ),
             _ => {
@@ -333,8 +340,8 @@ fn read_clause_expr(tokens: &mut Tokens) -> Result<Expr> {
 fn read_bracketed_list_r<T>(
     tokens: &mut Tokens,
     is_right: fn(&Token) -> bool,
-    read_element: fn(&mut Tokens,
-) -> Result<T>) -> Result<Vec<T>> {
+    read_element: fn(&mut Tokens) -> Result<T>
+) -> Result<Vec<T>> {
     let mut v = Vec::new();
     loop {
         let state = get_lexer_state(tokens);
@@ -352,8 +359,8 @@ fn read_bracketed_list<T>(
     tokens: &mut Tokens,
     is_left: fn(&Token) -> bool,
     is_right: fn(&Token) -> bool,
-    read_element: fn(&mut Tokens,
-) -> Result<T>) -> Result<Vec<T>> {
+    read_element: fn(&mut Tokens) -> Result<T>
+) -> Result<Vec<T>> {
     let t = read_token(tokens)?;
     if !is_left(&t) {
         return Err(Error::UnexpectedToken(t));
@@ -381,6 +388,10 @@ fn read_arg_list_c(tokens: &mut Tokens) -> Result<Vec<Expr>> {
     read_bracketed_list(tokens, |t| *t == Token::LParen, |t| *t == Token::Colon, read_expr)
 }
 
+fn read_type_param_list_r(tokens: &mut Tokens) -> Result<Vec<Type>> {
+    read_bracketed_list_r(tokens, |t| *t == Token::RBracket, |tokens| expr_to_type(read_expr(tokens)?))
+}
+
 fn expr_to_type(Expr(uexpr, type_): Expr) -> Result<Type> {
     if type_ != None {
         return Err(Error::InvalidType(Expr(uexpr, type_)));
@@ -400,6 +411,13 @@ fn expr_to_type(Expr(uexpr, type_): Expr) -> Result<Type> {
                 params.push(expr_to_type(param_expr)?);
             }
             Type::Function(params, Box::new(expr_to_type(*result_expr)?))
+        },
+        UExpr::Call(base_expr, param_exprs) => {
+            let mut params = Vec::new();
+            for param_expr in param_exprs {
+                params.push(expr_to_type(param_expr)?);
+            }
+            Type::Applied(Box::new(expr_to_type(*base_expr)?), params)
         },
         _ => return Err(Error::InvalidType(Expr(uexpr, type_))),
     })

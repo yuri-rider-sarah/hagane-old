@@ -62,3 +62,4 @@ test!(first_indent, "1");
 test!(comment, "1\n1");
 test!(tab_indent, "1");
 test!(function_type, "1");
+test!(array, "3\n9\n4\n16\n2\n2");
