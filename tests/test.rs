@@ -30,7 +30,25 @@ macro_rules! test {
                 .unwrap();
             assert!(program_out.status.success());
             assert_eq!(program_out.stdout, concat!($output, "\n").as_bytes());
-            std::fs::remove_file(concat!("tests/", stringify!($name), ".hgn.out")).unwrap();
+        }
+    };
+}
+
+macro_rules! test_fail {
+    ( $name:ident ) => {
+        #[test]
+        fn $name() {
+            let _deleter = Deleter { file: concat!("tests/", stringify!($name), ".hgn.out") };
+            let compiler_out = std::process::Command::new(COMPILER_PATH)
+                .arg(concat!("tests/", stringify!($name), ".hgn"))
+                .stderr(std::process::Stdio::inherit())
+                .output()
+                .unwrap();
+            assert!(compiler_out.status.success());
+            let program_out = std::process::Command::new(concat!("tests/", stringify!($name), ".hgn.out"))
+                .output()
+                .unwrap();
+            assert!(!program_out.status.success());
         }
     };
 }
@@ -63,3 +81,10 @@ test!(comment, "1\n1");
 test!(tab_indent, "1");
 test!(function_type, "1");
 test!(array, "3\n9\n4\n16\n2\n2");
+test!(array_nested, "4\n5\n6\n8\n10\n12\n12\n15\n18");
+test!(array_identity, "3");
+test_fail!(array_bounds_get);
+test_fail!(array_bounds_put);
+test_fail!(array_bounds_pop);
+test_fail!(array_bounds_get_neg);
+test_fail!(array_bounds_put_neg);
