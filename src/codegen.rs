@@ -59,6 +59,21 @@ unsafe fn codegen_box(val: LLVMValueRef, llvm_type: LLVMTypeRef, context: &mut C
     codegen_to_void_ptr(ptr, context)
 }
 
+unsafe fn codegen_check(
+    cond: LLVMValueRef,
+    error_c_func: LLVMValueRef,
+    func: LLVMValueRef,
+    context: &mut Context,
+) {
+    let then_block = LLVMAppendBasicBlock(func, BB_C_NAME);
+    let else_block = LLVMAppendBasicBlock(func, BB_C_NAME);
+    LLVMBuildCondBr(context.builder, cond, then_block, else_block);
+    LLVMPositionBuilderAtEnd(context.builder, then_block);
+    LLVMBuildCall(context.builder, error_c_func, std::ptr::null_mut(), 0, &0);
+    LLVMBuildUnreachable(context.builder);
+    LLVMPositionBuilderAtEnd(context.builder, else_block);
+}
+
 unsafe fn codegen_copy_loop(
     src: LLVMValueRef,
     dest: LLVMValueRef,
@@ -283,17 +298,28 @@ unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
         },
         context,
     )?;
+    let bounds_error_c_func = {
+        let c_func_name = CString::new("bounds_error").unwrap();
+        let llvm_c_func_type = LLVMFunctionType(LLVMVoidType(), std::ptr::null_mut(), 0, 0);
+        LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
+    };
     codegen_primitive_function(
         "get",
         Some(vec!["T".to_string()]),
         vec![list_t_type.clone(), Type::Named("Int".to_string())],
         Type::Named("T".to_string()),
         |func, context| {
-            let (_, contents) = codegen_decompose_list(
+            let (length, contents) = codegen_decompose_list(
                 codegen_load(LLVMGetParam(func, 0), list_type(), context),
                 context,
             );
             let mut i = codegen_load(LLVMGetParam(func, 1), LLVMInt64Type(), context);
+            codegen_check(
+                LLVMBuildICmp(context.builder, LLVMIntUGE, i, length, &0),
+                bounds_error_c_func,
+                func,
+                context,
+            );
             Ok(LLVMBuildLoad(context.builder,
                 LLVMBuildGEP(context.builder, contents, &mut i, 1, &0),
                 &0,
@@ -312,6 +338,12 @@ unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
                 context,
             );
             let mut i = codegen_load(LLVMGetParam(func, 1), LLVMInt64Type(), context);
+            codegen_check(
+                LLVMBuildICmp(context.builder, LLVMIntUGE, i, length, &0),
+                bounds_error_c_func,
+                func,
+                context,
+            );
             let contents = LLVMBuildArrayMalloc(context.builder, void_ptr_type(), length, &0);
             codegen_copy_loop(old_contents, contents, length, func, context);
             LLVMBuildStore(context.builder,
@@ -351,6 +383,12 @@ unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
         |func, context| {
             let (old_length, old_contents) = codegen_decompose_list(
                 codegen_load(LLVMGetParam(func, 0), list_type(), context),
+                context,
+            );
+            codegen_check(
+                LLVMBuildICmp(context.builder, LLVMIntEQ, old_length, LLVMConstInt(LLVMInt64Type(), 0, 0), &0),
+                bounds_error_c_func,
+                func,
                 context,
             );
             let length = LLVMBuildSub(context.builder, old_length, LLVMConstInt(LLVMInt64Type(), 1, 0), &0);
