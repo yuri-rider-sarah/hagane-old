@@ -1,4 +1,4 @@
-# Hagane Language Reference (version 0.0.2)
+# Hagane Language Reference (version 0.0.3)
 
 ## 1. Tokens
 A program consists of a sequence of tokens. Whitespace characters may occur anywhere between tokens, and are used to separate them.
@@ -28,9 +28,12 @@ Comments are marked with the character `※` and last until the end of the line.
 ## 2. Types
 
 ### 2.1. Basic types
-There are two builtin types: `Int` and `Bool`.
+There are two basic builtin types: `Int` and `Bool`.
 - `Int` represents 64-bit signed integers.
 - `Bool` represents true/false values, denoted respectively as `⊤`/`⊥`.
+
+There is also a polymorphic builtin type `List`:
+- `List[T]` represents a list whose elements have type `T`.
 
 ### 2.2. Tuple types
 ```
@@ -154,9 +157,17 @@ Block and clause special expressions may not have a type annotation.
 
 It's intended to be used in situations where the type cannot be inferred automatically and therefore has to be specified manually.
 
+### 3.6. Type arguments
+```
+<var>[<type_arg_1> ... <type_arg_n>]
+```
+The polymorphic variable `<var>` is instantiated with the type arguments `<type_arg_1>` through `<type_arg_n>`.
+
+Due to limited type inference in the current version all uses of polymorphic variables must be given explicit type arguments.
+
 # 4. Builtin special expressions
 
-Names of blocks are written in triangle brackets. All secondary keywords are optional.
+Names of blocks are written in triangle brackets. Optional parts of expressions are written in square brackets. All secondary keywords not written in square brackets are optional and don't influence the meaning of the expression.
 
 ### 4.1. `do.`
 ```
@@ -166,13 +177,19 @@ The block `<block>` is evaluated.
 
 ### 4.2. `let.`
 ```
-let. <identifier> <expr>
+let. [mut,] [∀, <type_params>] <identifier> <expr>
 ```
 `<identifier>` must consist of a single identifier.
 
 The variable `<identifier>` is declared and bound to the value of `<expr>`.
 
 The same variable may be declared multiple times, in which case the later declarations shadow earlier ones.
+
+If `mut,` is used, the declared variable will be mutable.
+
+If `∀, <type_params>` is used, the declared variable will be polymorphic, taking type parameters `<type_params>`.
+
+A variable cannot be both polymorphic and mutable.
 
 The type of this expression is `#()`.
 
@@ -214,7 +231,7 @@ The block `<vars>` must consist of variables.
 
 This evaluates to an function that takes as parameters the variables composing `<vars>` and returns the value of the block `<body>`.
 
-Due to limited type inference in the current version all `λ.` expressions must have type annotations on all their parameters and the last expression of the body.
+Due to limited type inference in the current version, all `λ.` expressions must have type annotations on all their parameters and the last expression of the body.
 
 ## 5. Builtin functions
 Several basic functions are built into the language.
@@ -240,7 +257,33 @@ These functions perform basic arithmetic on integers.
 ```
 These functions perform basic integer comparisons.
 
-### 5.3. Input/output
+### 5.3. Lists
+```
+empty '†(T) List(T)
+len '†(T) ‡(List(T) : Int)
+get '†(T) ‡(List(T) Int : Int)
+put '†(T) ‡(List(T) Int T : List(T))
+push '†(T) ‡(List(T) T : List(T))
+pop '†(T) ‡(List(T) : List(T))
+```
+
+Here, `†(T)` means "for every type `T`".
+
+`empty` is a list with no elements.
+
+`len` returns the length of a list.
+
+`get` returns the element at a given index in a list.
+
+`put` returns a list where the element at a given index is replaced with the specified value.
+
+`push` returns a list with the given value appended to the end.
+
+`pop` returns the given list without the last element.
+
+If an index given to `get` or `put` is out of the list's bounds, or if `pop` is called on an empty list, an error message is printed to the standard error and the program fails.
+
+### 5.4. Input/output
 ```
 print '(Int : #())
 read '(: Int)
