@@ -9,7 +9,7 @@ pub enum UExpr {
     Function(Vec<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Monomorphic(Box<Expr>, Vec<Type>),
-    Let(Box<Expr>, Vec<Expr>, bool),
+    Let(Option<Vec<String>>, Box<Expr>, Vec<Expr>, bool),
     Set(Box<Expr>, Vec<Expr>),
     If(Vec<Expr>, Vec<Expr>, Vec<Expr>),
     While(Vec<Expr>, Vec<Expr>),
@@ -61,11 +61,27 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
     Ok(match &keyword[..] {
         "let" => match &clauses[..] {
             [Block(var), Block(val)] => match &var[..] {
-                [var] => UExpr::Let(Box::new(var.clone()), val.clone(), false),
+                [var] => UExpr::Let(None, Box::new(var.clone()), val.clone(), false),
                 _ => return Err(Error::InvalidExpr),
             },
             [SecKeyword(mut_kw), Block(var), Block(val)] if mut_kw == "mut" => match &var[..] {
-                [var] => UExpr::Let(Box::new(var.clone()), val.clone(), true),
+                [var] => UExpr::Let(None, Box::new(var.clone()), val.clone(), true),
+                _ => return Err(Error::InvalidExpr),
+            },
+            [SecKeyword(fa_kw), Block(type_param_exprs), Block(var), Block(val)] if fa_kw == "∀" => match &var[..] {
+                [var] => {
+                    let mut type_params = Vec::new();
+                    for Expr(uexpr, stated_type) in type_param_exprs {
+                        if *stated_type != None {
+                            return Err(Error::InvalidExpr);
+                        }
+                        match uexpr {
+                            UExpr::Ident(param) => type_params.push(param.clone()),
+                            _ => return Err(Error::InvalidExpr),
+                        }
+                    }
+                    UExpr::Let(Some(type_params), Box::new(var.clone()), val.clone(), false)
+                },
                 _ => return Err(Error::InvalidExpr),
             },
             _ => return Err(Error::InvalidExpr),

@@ -489,16 +489,20 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 _ => return Err(Error::NotPolymorphic),
             }
         },
-        Let(name, exprs, false) => match &**name {
+        Let(type_params, name, exprs, false) => match &**name {
             Expr(Ident(name), stated_type) => {
-                let (value, type_) = codegen_block(exprs, context)?;
+                let (value, monotype) = codegen_block(exprs, context)?;
+                let type_ = match type_params {
+                    None => monotype,
+                    Some(type_params) => Type::Forall(type_params.clone(), Box::new(monotype)),
+                };
                 check_type_compat(stated_type, &type_)?;
                 context.names.push((name.clone(), Var::Const(value), type_));
                 codegen_unit(context)
             },
             _ => return Err(Error::AssignToExpr),
         },
-        Let(name, exprs, true) => match &**name {
+        Let(None, name, exprs, true) => match &**name {
             Expr(Ident(name), stated_type) => {
                 let (value, type_) = codegen_block(exprs, context)?;
                 check_type_compat(stated_type, &type_)?;
@@ -511,6 +515,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             },
             _ => return Err(Error::AssignToExpr),
         },
+        Let(Some(_), _, _, true) => return Err(Error::PolymorphicMut),
         Set(name, exprs) => match &**name {
             Expr(Ident(name), stated_type) => {
                 let (var, var_type) = match resolve_name(&context.names, name)? {

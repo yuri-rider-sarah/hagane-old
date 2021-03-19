@@ -88,3 +88,4 @@ test_fail!(array_bounds_put);
 test_fail!(array_bounds_pop);
 test_fail!(array_bounds_get_neg);
 test_fail!(array_bounds_put_neg);
+test!(let_polymorphic, "2\n5\n10\n0\n1\n0");

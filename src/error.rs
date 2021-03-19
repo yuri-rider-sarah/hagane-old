@@ -21,6 +21,7 @@ pub enum Error {
     NonParametrizableType(Type),
     MismatchedTypeArgsNum(usize, usize),
     NotPolymorphic,
+    PolymorphicMut,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
