@@ -20,6 +20,7 @@ pub enum Token {
     Colon,
     Hash,
     DoubleDagger,
+    Period,
     Eof,
 }
 
@@ -210,6 +211,7 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
         ':' => Colon,
         '#' => Hash,
         '‡' => DoubleDagger,
+        '.' => Period,
         '0'..='9' => {
             let mut n = 0;
             while let Some(c0) = c {

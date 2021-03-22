@@ -53,6 +53,7 @@ fn read_expr(tokens: &mut Tokens) -> Result<Expr> {
 #[derive(Debug)]
 enum Clause {
     SecKeyword(String),
+    Label(Expr),
     Block(Vec<Expr>),
 }
 
@@ -162,6 +163,7 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
                 let state = get_lexer_state(tokens);
                 clauses.push(match read_token_or_indent(tokens, indent_depth)? {
                     Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
+                    Token::Period => Clause::Label(read_expr(tokens)?),
                     Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                     Token::LIndent => {
                         let state_indent = get_lexer_state(tokens);
@@ -215,6 +217,7 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
                         let at_line_start = lexer_at_line_start(tokens);
                         clauses.push(match read_token_or_indent(tokens, indent_depth)? {
                             Token::SecKeyword(keyword) => Clause::SecKeyword(keyword),
+                            Token::Period => Clause::Label(read_expr(tokens)?),
                             Token::LBrace => Clause::Block(read_block_brace_r(tokens)?),
                             Token::LIndent => {
                                 let state_indent = get_lexer_state(tokens);
@@ -272,6 +275,13 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) ->
                     break;
                 }
                 Clause::SecKeyword(keyword)
+            },
+            Token::Period => {
+                if at_line_start && !past_indent {
+                    restore_lexer_state(tokens, state);
+                    break;
+                }
+                Clause::Label(read_expr(tokens)?)
             },
             Token::LBrace => {
                 if at_line_start && !past_indent {
