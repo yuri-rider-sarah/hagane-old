@@ -11,6 +11,10 @@ void bounds_error(void) {
     error("List index out of bounds");
 }
 
+void case_error(void) {
+    error("Inexhaustive cases");
+}
+
 void print(int64_t n) {
     printf("%"PRId64"\n", n);
 }

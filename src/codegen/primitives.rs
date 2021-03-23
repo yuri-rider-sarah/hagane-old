@@ -372,5 +372,10 @@ pub unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
         },
         context,
     )?;
+    {
+        let c_func_name = CString::new("case_error").unwrap();
+        let llvm_c_func_type = LLVMFunctionType(LLVMVoidType(), std::ptr::null_mut(), 0, 0);
+        LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
+    };
     Ok(())
 }

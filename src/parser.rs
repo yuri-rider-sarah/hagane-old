@@ -15,6 +15,7 @@ pub enum UExpr {
     While(Vec<Expr>, Vec<Expr>),
     Do(Vec<Expr>),
     Lambda(Vec<Expr>, Vec<Expr>),
+    Cond(Vec<(Expr, Vec<Expr>)>),
 }
 
 #[derive(Clone, Debug)]
@@ -134,6 +135,19 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
             };
             UExpr::Lambda(args.clone(), body.clone())
         },
+        "cond" => {
+            if clauses.len() % 2 != 0 {
+                return Err(Error::InvalidExpr);
+            }
+            let mut cases = Vec::new();
+            for i in 0 .. clauses.len() / 2 {
+                match (&clauses[2 * i], &clauses[2 * i + 1]) {
+                    (Label(cond), Block(body)) => cases.push((cond.clone(), body.clone())),
+                    _ => return Err(Error::InvalidExpr),
+                }
+            }
+            UExpr::Cond(cases)
+        },
         _ => return Err(Error::InvalidExpr),
     })
 }
@@ -172,6 +186,11 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
                                 restore_lexer_state(tokens, state);
                                 let _ = read_token(tokens)?;
                                 Clause::SecKeyword(keyword)
+                            },
+                            Token::Period => {
+                                restore_lexer_state(tokens, state);
+                                let _ = read_token(tokens)?;
+                                Clause::Label(read_expr(tokens)?)
                             },
                             Token::LBrace => {
                                 restore_lexer_state(tokens, state);
@@ -226,6 +245,11 @@ pub fn read_block_expr(tokens: &mut Tokens) -> Result<Expr> {
                                         restore_lexer_state(tokens, state_loop);
                                         let _ = read_token(tokens)?;
                                         Clause::SecKeyword(keyword)
+                                    },
+                                    Token::Period => {
+                                        restore_lexer_state(tokens, state_loop);
+                                        let _ = read_token(tokens)?;
+                                        Clause::Label(read_expr(tokens)?)
                                     },
                                     Token::LBrace => {
                                         restore_lexer_state(tokens, state_loop);
@@ -301,6 +325,15 @@ fn read_clause_special_expr_clauses(tokens: &mut Tokens, indent_depth: usize) ->
                             past_indent = true;
                         }
                         Clause::SecKeyword(keyword)
+                    },
+                    Token::Period => {
+                        if past_indent {
+                            restore_lexer_state(tokens, state);
+                            let _ = read_token(tokens)?;
+                        } else {
+                            past_indent = true;
+                        }
+                        Clause::Label(read_expr(tokens)?)
                     },
                     Token::LBrace => {
                         if past_indent {
