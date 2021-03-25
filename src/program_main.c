@@ -7,6 +7,10 @@ static void error(char *msg) {
     exit(1);
 }
 
+void div_by_zero_error(void) {
+    error("Division by zero");
+}
+
 void bounds_error(void) {
     error("List index out of bounds");
 }

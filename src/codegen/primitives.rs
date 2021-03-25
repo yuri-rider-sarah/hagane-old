@@ -174,6 +174,37 @@ unsafe fn codegen_binary_arith_primitive(
     )
 }
 
+unsafe fn codegen_binary_arith_div_primitive(
+    name: &str,
+    build: unsafe extern "C" fn(LLVMBuilderRef, LLVMValueRef, LLVMValueRef, *const i8) -> LLVMValueRef,
+    context: &mut Context
+) -> Result<()> {
+    let error_c_func_name = CString::new("div_by_zero_error").unwrap();
+    let div_by_zero_error_c_func = LLVMGetNamedFunction(context.module, error_c_func_name.as_ptr());
+    codegen_primitive_function(
+        name,
+        None,
+        vec![Type::Named("Int".to_string()), Type::Named("Int".to_string())],
+        Type::Named("Int".to_string()),
+        |func, context| {
+            let arg1 = codegen_load(LLVMGetParam(func, 0), LLVMInt64Type(), context);
+            let arg2 = codegen_load(LLVMGetParam(func, 1), LLVMInt64Type(), context);
+            codegen_check(
+                LLVMBuildICmp(context.builder, LLVMIntEQ, arg2, LLVMConstInt(LLVMInt64Type(), 0, 0), &0),
+                div_by_zero_error_c_func,
+                func,
+                context,
+            );
+            Ok(codegen_box(
+                build(context.builder, arg1, arg2, &0),
+                LLVMInt64Type(),
+                context,
+            ))
+        },
+        context,
+    )
+}
+
 unsafe fn codegen_binary_cmp_primitive(name: &str, cmp: LLVMIntPredicate, context: &mut Context) -> Result<()> {
     codegen_primitive_function(
         name,
@@ -195,13 +226,18 @@ unsafe fn codegen_binary_cmp_primitive(name: &str, cmp: LLVMIntPredicate, contex
 }
 
 pub unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
+    {
+        let c_func_name = CString::new("div_by_zero_error").unwrap();
+        let llvm_c_func_type = LLVMFunctionType(LLVMVoidType(), std::ptr::null_mut(), 0, 0);
+        LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
+    };
     codegen_bool_constant_primitive("⊥", 0, context)?;
     codegen_bool_constant_primitive("⊤", 1, context)?;
     codegen_binary_arith_primitive("+", LLVMBuildAdd, context)?;
     codegen_binary_arith_primitive("-", LLVMBuildSub, context)?;
     codegen_binary_arith_primitive("*", LLVMBuildMul, context)?;
-    codegen_binary_arith_primitive("/", LLVMBuildSDiv, context)?;
-    codegen_binary_arith_primitive("%", LLVMBuildSRem, context)?;
+    codegen_binary_arith_div_primitive("/", LLVMBuildSDiv, context)?;
+    codegen_binary_arith_div_primitive("%", LLVMBuildSRem, context)?;
     codegen_binary_cmp_primitive("=", LLVMIntEQ, context)?;
     codegen_binary_cmp_primitive("≠", LLVMIntNE, context)?;
     codegen_binary_cmp_primitive("<", LLVMIntSLT, context)?;
