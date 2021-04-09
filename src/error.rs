@@ -18,10 +18,13 @@ pub enum Error {
     AssignToConst,
     InconsistentIndentation(char, char),
     InvalidType(Expr),
+    InvalidPattern(Expr),
     NonParametrizableType(Type),
     MismatchedTypeArgsNum(usize, usize),
     NotPolymorphic,
     PolymorphicMut,
+    ConflictingPatternType,
+    NotAConstructor(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

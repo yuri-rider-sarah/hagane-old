@@ -1,0 +1,11 @@
+type. OptInt
+    Some(Int)
+    None()
+
+match. Some(4)
+.Some(x) print(+(x 1))
+.None() print(0)
+
+match. None()
+.Some(x) print(+(x 1))
+.None() print(0)

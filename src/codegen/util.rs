@@ -8,16 +8,81 @@ use llvm_sys::core::*;
 pub const ENTRY_C_NAME: *const i8 = b"entry\0" as *const u8 as *const i8;
 pub const BB_C_NAME: *const i8 = b"bb\0" as *const u8 as *const i8;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Var {
-    Const(LLVMValueRef),
-    Mut(LLVMValueRef),
+    Const(LLVMValueRef, Type),
+    Mut(LLVMValueRef, Type),
+    Ctor(LLVMValueRef, u64, Vec<Type>, Type),
+}
+
+pub unsafe fn var_value(var: &Var, context: &Context) -> LLVMValueRef {
+    match var {
+        Var::Const(val, _) => *val,
+        Var::Mut(ptr, _) => LLVMBuildLoad(context.builder, *ptr, &0),
+        Var::Ctor(ctor, _, _, _) => *ctor,
+    }
+}
+
+pub fn var_type(var: Var) -> Type {
+    match var {
+        Var::Const(_, type_) => type_,
+        Var::Mut(_, type_) => type_,
+        Var::Ctor(_, _, param_types, ret_type) => Type::Function(param_types, Box::new(ret_type)),
+    }
+}
+
+pub unsafe fn get_llvm_variant_type(num_params: usize) -> LLVMTypeRef {
+    let mut llvm_types = vec![LLVMInt64Type()];
+    for _ in 0..num_params {
+        llvm_types.push(void_ptr_type());
+    }
+    LLVMStructType(llvm_types.as_mut_ptr(), llvm_types.len() as u32, 0)
+}
+
+pub unsafe fn codegen_var_ctor(tag: u64, param_types: Vec<Type>, ret_type: Type, name: &str, context: &mut Context) -> Result<()> {
+    let parent = LLVMGetInsertBlock(context.builder);
+    let func = create_function(context, name, param_types.len())?;
+    let llvm_type = get_llvm_variant_type(param_types.len());
+    let ret_val = LLVMBuildMalloc(context.builder, llvm_type, &0);
+    let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), 0, 0)];
+    let ptr = LLVMBuildGEP(context.builder, ret_val, indices.as_mut_ptr(), indices.len() as u32, &0);
+    LLVMBuildStore(context.builder, LLVMConstInt(LLVMInt64Type(), tag as u64, 0), ptr);
+    for i in 0 .. param_types.len() {
+        let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), (i + 1) as u64, 0)];
+        let ptr = LLVMBuildGEP(context.builder, ret_val, indices.as_mut_ptr(), indices.len() as u32, &0);
+        LLVMBuildStore(context.builder, LLVMGetParam(func, i as u32), ptr);
+    }
+    LLVMBuildRet(context.builder, codegen_to_void_ptr(ret_val, context));
+    LLVMPositionBuilderAtEnd(context.builder, parent);
+    let val = function_value(func, &Type::Function(param_types.clone(), Box::new(ret_type.clone())), context)?;
+    context.names.push((name.to_string(), Var::Ctor(val, tag, param_types, ret_type)));
+    Ok(())
 }
 
 pub struct Context {
     pub module: LLVMModuleRef,
     pub builder: LLVMBuilderRef,
-    pub names: Vec<(String, Var, Type)>
+    pub names: Vec<(String, Var)>
+}
+
+pub unsafe fn function_value(func: LLVMValueRef, func_type: &Type, context: &mut Context) -> Result<LLVMValueRef> {
+    let llvm_type = get_unboxed_llvm_type(func_type)?;
+    let val = LLVMBuildMalloc(context.builder, llvm_type, &0);
+    LLVMBuildStore(context.builder,
+        LLVMBuildInsertValue(context.builder,
+            LLVMBuildInsertValue(context.builder,
+                LLVMGetUndef(llvm_type),
+                func,
+                0,
+                &0,
+            ),
+            LLVMConstNull(void_ptr_type()),
+            1,
+            &0,
+        ),
+        val,
+    );
+    Ok(codegen_to_void_ptr(val, context))
 }
 
 pub unsafe fn create_function(context: &mut Context, name: &str, params_num: usize) -> Result<LLVMValueRef> {
@@ -122,11 +187,11 @@ pub unsafe fn get_llvm_function_type(params: usize) -> LLVMTypeRef {
     )
 }
 
-pub fn resolve_name(names: &Vec<(String, Var, Type)>, name: &str) -> Result<(Var, Type)> {
+pub fn resolve_name(names: &Vec<(String, Var)>, name: &str) -> Result<Var> {
     names
         .iter()
         .rev()
-        .find_map(|(key, value, type_)| if *key == *name { Some((*value, type_.clone())) } else { None })
+        .find_map(|(key, value)| if *key == *name { Some(value.clone()) } else { None })
         .ok_or(Error::UnboundVariable(name.to_string()))
 }
 

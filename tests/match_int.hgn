@@ -1,0 +1,12 @@
+match. *(2 4)
+.1 print(0)
+.5 print(1)
+.8 print(2)
+.9 print(3)
+._ print(4)
+
+match. +(2 2)
+.1 print(5)
+.2 print(6)
+.3 print(7)
+._ print(8)

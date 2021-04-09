@@ -5,11 +5,13 @@ use crate::codegen::util::*;
 use crate::error::*;
 use crate::parser::Expr;
 use crate::parser::UExpr::*;
+use crate::parser::Pattern;
 use crate::parser::Type;
 use std::ffi::CString;
 use llvm_sys::*;
 use llvm_sys::prelude::*;
 use llvm_sys::core::*;
+use llvm_sys::LLVMIntPredicate::*;
 
 pub unsafe fn codegen_top(exprs: &Vec<Expr>) -> Result<LLVMModuleRef> {
     let module_c_name = CString::new("module").unwrap();
@@ -30,6 +32,89 @@ pub unsafe fn codegen_top(exprs: &Vec<Expr>) -> Result<LLVMModuleRef> {
     Ok(module)
 }
 
+unsafe fn codegen_pattern_test(
+    val: LLVMValueRef,
+    type_: &Type,
+    pattern: &Pattern,
+    context: &mut Context,
+) -> Result<Vec<(LLVMBasicBlockRef, LLVMValueRef, LLVMBasicBlockRef)>> {
+    use crate::parser::Pattern::*;
+    let parent_block = LLVMGetInsertBlock(context.builder);
+    let function = LLVMGetBasicBlockParent(parent_block);
+    Ok(match pattern {
+        IntLiteral(n) => {
+            if type_ != &Type::Named("Int".to_string()) {
+                return Err(Error::ConflictingType(type_.clone(), Type::Named("Int".to_string())));
+            }
+            let test_val = LLVMBuildICmp(context.builder,
+                LLVMIntEQ,
+                codegen_load(val, LLVMInt64Type(), context),
+                LLVMConstInt(LLVMInt64Type(), *n as u64, 0),
+                &0,
+            );
+            let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+            LLVMPositionBuilderAtEnd(context.builder, then_block);
+            vec![(parent_block, test_val, then_block)]
+        },
+        Ident(name) => {
+            context.names.push((name.clone(), Var::Const(val, type_.clone())));
+            vec![]
+        },
+        Wildcard => vec![],
+        Tuple(patterns) => {
+            let subtypes = match type_ {
+                Type::Tuple(subtypes) => subtypes,
+                _ => return Err(Error::ConflictingPatternType),
+            };
+            if patterns.len() != subtypes.len() {
+                return Err(Error::ConflictingPatternType);
+            }
+            let tuple = LLVMBuildBitCast(context.builder, val, LLVMPointerType(get_unboxed_llvm_type(type_)?, 0), &0);
+            let mut branches = vec![];
+            for (i, (subpattern, subtype)) in Iterator::zip(patterns.iter(), subtypes).enumerate() {
+                let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
+                let subval = LLVMBuildLoad(context.builder,
+                    LLVMBuildGEP(context.builder, tuple, indices.as_mut_ptr(), indices.len() as u32, &0),
+                    &0,
+                );
+                branches.append(&mut codegen_pattern_test(subval, subtype, subpattern, context)?);
+            }
+            branches
+        },
+        Variant(ctor, patterns) => {
+            let (tag, subtypes) = match resolve_name(&context.names, &**ctor)? {
+                Var::Ctor(_, tag, subtypes, ctor_type) => {
+                    if type_ != &ctor_type {
+                        return Err(Error::ConflictingPatternType);
+                    }
+                    (tag, subtypes)
+                },
+                _ => return Err(Error::NotAConstructor(ctor.to_string())),
+            };
+            let tag_ptr = LLVMBuildBitCast(context.builder, val, LLVMPointerType(LLVMInt64Type(), 0), &0);
+            let tag_test = LLVMBuildICmp(context.builder,
+                LLVMIntEQ,
+                LLVMBuildLoad(context.builder, tag_ptr, &0),
+                LLVMConstInt(LLVMInt64Type(), tag, 0),
+                &0,
+            );
+            let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+            LLVMPositionBuilderAtEnd(context.builder, then_block);
+            let mut branches = vec![(parent_block, tag_test, then_block)];
+            let variant = LLVMBuildBitCast(context.builder, val, LLVMPointerType(get_llvm_variant_type(subtypes.len()), 0), &0);
+            for (i, (subpattern, subtype)) in Iterator::zip(patterns.iter(), subtypes).enumerate() {
+                let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), (i + 1) as u64, 0)];
+                let subval = LLVMBuildLoad(context.builder,
+                    LLVMBuildGEP(context.builder, variant, indices.as_mut_ptr(), indices.len() as u32, &0),
+                    &0,
+                );
+                branches.append(&mut codegen_pattern_test(subval, &subtype, subpattern, context)?);
+            }
+            branches
+        },
+    })
+}
+
 unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Result<(LLVMValueRef, Type)> {
     let (value, inferred_type) = match uexpr {
         IntLiteral(n) => {
@@ -39,12 +124,10 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             (codegen_to_void_ptr(val, context), type_)
         },
         Ident(name) => {
-            let (var, type_) = resolve_name(&context.names, name)?;
-            (match var {
-                Var::Const(val) => val,
-                Var::Mut(ptr) => LLVMBuildLoad(context.builder, ptr, &0),
-            }, type_)
+            let var = resolve_name(&context.names, name)?;
+            (var_value(&var, context), var_type(var))
         },
+        Wildcard => return Err(Error::InvalidExpr),
         Tuple(exprs) => {
             let (values, types) = codegen_group(exprs, context)?;
             let type_ = Type::Tuple(types);
@@ -79,7 +162,8 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             let Expr(uexpr, stated_type) = &**expr;
             match uexpr {
                 Ident(name) => {
-                    let (var, name_type) = resolve_name(&context.names, name)?;
+                    let var = resolve_name(&context.names, name)?;
+                    let name_type = var_type(var.clone());
                     check_type_compat(stated_type, &name_type)?;
                     let type_ = match name_type {
                         Type::Forall(params, name_type) => {
@@ -91,10 +175,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                         },
                         _ => Type::Applied(Box::new(name_type), args.clone()),
                     };
-                    (match var {
-                        Var::Const(val) => val,
-                        Var::Mut(ptr) => LLVMBuildLoad(context.builder, ptr, &0),
-                    }, type_)
+                    (var_value(&var, context), type_)
                 },
                 _ => return Err(Error::NotPolymorphic),
             }
@@ -107,7 +188,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                     Some(type_params) => Type::Forall(type_params.clone(), Box::new(monotype)),
                 };
                 check_type_compat(stated_type, &type_)?;
-                context.names.push((name.clone(), Var::Const(value), type_));
+                context.names.push((name.clone(), Var::Const(value, type_)));
                 codegen_unit(context)
             },
             _ => return Err(Error::AssignToExpr),
@@ -119,8 +200,8 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 let c_name = CString::new(&name[..]).unwrap();
                 let ptr = LLVMBuildMalloc(context.builder, void_ptr_type(), c_name.as_ptr());
                 LLVMBuildStore(context.builder, value, ptr);
-                let var = Var::Mut(ptr);
-                context.names.push((name.clone(), var, type_));
+                let var = Var::Mut(ptr, type_);
+                context.names.push((name.clone(), var));
                 codegen_unit(context)
             },
             _ => return Err(Error::AssignToExpr),
@@ -129,8 +210,8 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
         Set(name, exprs) => match &**name {
             Expr(Ident(name), stated_type) => {
                 let (var, var_type) = match resolve_name(&context.names, name)? {
-                    (Var::Mut(var), var_type) => (var, var_type),
-                    _ => return Err(Error::AssignToConst),
+                    Var::Mut(var, var_type) => (var, var_type),
+                    Var::Const(_, _) | Var::Ctor(_, _, _, _) => return Err(Error::AssignToConst),
                 };
                 let (val, val_type) = codegen_block(exprs, context)?;
                 if val_type != var_type {
@@ -141,6 +222,12 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 codegen_unit(context)
             },
             _ => return Err(Error::AssignToExpr),
+        },
+        Type(type_name, variants) => {
+            for (i, (variant_name, param_types)) in variants.iter().enumerate() {
+                codegen_var_ctor(i as u64, param_types.clone(), Type::Named(type_name.clone()), variant_name, context)?;
+            }
+            codegen_unit(context)
         },
         If(cond, then, else_) => {
             let (cond_val_ptr, cond_type) = codegen_block(cond, context)?;
@@ -175,48 +262,32 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             (phi, then_type)
         },
         Cond(cases) => {
-            let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
-            let mut type_ = stated_type.clone();
-            let mut branches = Vec::new();
-            for (cond, then) in cases {
-                let (cond_val_ptr, cond_type) = codegen_block(&vec![cond.clone()], context)?;
-                if cond_type != Type::Named("Bool".to_string()) {
-                    return Err(Error::ConflictingType(cond_type, Type::Named("Bool".to_string())));
-                }
-                let cond_val = codegen_load(cond_val_ptr, LLVMInt1Type(), context);
-                let parent_block = LLVMGetInsertBlock(context.builder);
-                let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
-                LLVMPositionBuilderAtEnd(context.builder, then_block);
-                let (then_val, then_type) = codegen_block(then, context)?;
-                match type_ {
-                    Some(type_) if then_type != type_ => return Err(Error::ConflictingType(then_type, type_)),
-                    Some(_) => (),
-                    None => type_ = Some(then_type),
-                }
-                let then_end = LLVMGetInsertBlock(context.builder);
-                branches.push((then_val, then_end));
-                let else_block = LLVMAppendBasicBlock(function, BB_C_NAME);
-                LLVMPositionBuilderAtEnd(context.builder, parent_block);
-                LLVMBuildCondBr(context.builder, cond_val, then_block, else_block);
-                LLVMPositionBuilderAtEnd(context.builder, else_block);
-            }
-            let error_c_func_name = CString::new("case_error").unwrap();
-            let error_c_func = LLVMGetNamedFunction(context.module, error_c_func_name.as_ptr());
-            LLVMBuildCall(context.builder, error_c_func, std::ptr::null_mut(), 0, &0);
-            LLVMBuildUnreachable(context.builder);
-            let merge_block = LLVMAppendBasicBlock(function, BB_C_NAME);
-            LLVMPositionBuilderAtEnd(context.builder, merge_block);
-            let phi = LLVMBuildPhi(context.builder, void_ptr_type(), &0);
-            for (mut val, mut block) in branches {
-                LLVMPositionBuilderAtEnd(context.builder, block);
-                LLVMBuildBr(context.builder, merge_block);
-                LLVMAddIncoming(phi, &mut val, &mut block, 1);
-            }
-            LLVMPositionBuilderAtEnd(context.builder, merge_block);
-            (phi, match type_ {
-                Some(t) => t,
-                None => return Err(Error::AmbiguousType),
-            })
+            codegen_branching(
+                cases,
+                |expr, context| {
+                    let (cond_val_ptr, cond_type) = codegen(expr, context)?;
+                    if cond_type != Type::Named("Bool".to_string()) {
+                        return Err(Error::ConflictingType(cond_type, Type::Named("Bool".to_string())));
+                    }
+                    let cond_val = codegen_load(cond_val_ptr, LLVMInt1Type(), context);
+                    let parent_block = LLVMGetInsertBlock(context.builder);
+                    let function = LLVMGetBasicBlockParent(parent_block);
+                    let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+                    LLVMPositionBuilderAtEnd(context.builder, then_block);
+                    Ok(vec![(parent_block, cond_val, then_block)])
+                },
+                stated_type.clone(),
+                context
+            )?
+        },
+        Match(test_expr, cases) => {
+            let (val, type_) = codegen(test_expr, context)?;
+            codegen_branching(
+                cases,
+                |pattern, context| codegen_pattern_test(val, &type_, pattern, context),
+                stated_type.clone(),
+                context
+            )?
         },
         While(cond, body) => {
             let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
@@ -228,12 +299,13 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 return Err(Error::ConflictingType(cond_type, Type::Named("Bool".to_string())));
             }
             let cond_val = codegen_load(cond_val_ptr, LLVMInt1Type(), context);
+            let cond_end = LLVMGetInsertBlock(context.builder);
             let body_block = LLVMAppendBasicBlock(function, BB_C_NAME);
             LLVMPositionBuilderAtEnd(context.builder, body_block);
             let _ = codegen_block(body, context)?;
             LLVMBuildBr(context.builder, cond_block);
-            LLVMPositionBuilderAtEnd(context.builder, cond_block);
             let merge_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+            LLVMPositionBuilderAtEnd(context.builder, cond_end);
             LLVMBuildCondBr(context.builder, cond_val, body_block, merge_block);
             LLVMPositionBuilderAtEnd(context.builder, merge_block);
             codegen_unit(context)
@@ -269,10 +341,11 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 },
             };
             let mut captures_types = Vec::new();
-            for (_, var, _) in &context.names {
+            for (_, var) in &context.names {
                 captures_types.push(match var {
-                    Var::Const(_) => void_ptr_type(),
-                    Var::Mut(_) => LLVMPointerType(void_ptr_type(), 0),
+                    Var::Const(_, _) => void_ptr_type(),
+                    Var::Mut(_, _) => LLVMPointerType(void_ptr_type(), 0),
+                    Var::Ctor(_, _, _, _) => void_ptr_type(),
                 });
             }
             let func = create_function(context, "lambda", param_types.len())?;
@@ -287,22 +360,23 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 LLVMPointerType(captures_type, 0),
                 &0,
             );
-            let mut inner_names: Vec<_> = context.names.iter().enumerate().map(|(i, (name, var, type_))| {
+            let mut inner_names: Vec<_> = context.names.iter().enumerate().map(|(i, (name, var))| {
                 let c_name = CString::new(&name[..]).unwrap();
                 let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
                 let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, c_name.as_ptr());
                 let val = LLVMBuildLoad(context.builder, ptr, c_name.as_ptr());
                 (name.clone(), match var {
-                    Var::Const(_) => Var::Const(val),
-                    Var::Mut(_) => Var::Mut(val),
-                }, type_.clone())
+                    Var::Const(_, type_) => Var::Const(val, type_.clone()),
+                    Var::Mut(_, type_) => Var::Mut(val, type_.clone()),
+                    Var::Ctor(_, i, param_types, ret_type) => Var::Ctor(val, *i, param_types.clone(), ret_type.clone()),
+                })
             }).collect();
             for (i, (Expr(name, _), param_type)) in Iterator::zip(expr_params.iter(), param_types.iter()).enumerate() {
                 match name {
                     Ident(name) => {
                         let value = LLVMGetParam(func, i as u32);
                         LLVMSetValueName2(value, name.as_ptr() as *const i8, name.len());
-                        inner_names.push((name.clone(), Var::Const(value), param_type.clone()));
+                        inner_names.push((name.clone(), Var::Const(value, param_type.clone())));
                     },
                     _ => return Err(Error::AssignToExpr),
                 }
@@ -314,12 +388,13 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             }
             LLVMPositionBuilderAtEnd(context.builder, parent);
             let captures = LLVMBuildMalloc(context.builder, captures_type, &0);
-            for (i, (_, var, _)) in context.names.iter().enumerate() {
+            for (i, (_, var)) in context.names.iter().enumerate() {
                 let mut indices = vec![LLVMConstInt(LLVMInt64Type(), 0, 0), LLVMConstInt(LLVMInt32Type(), i as u64, 0)];
                 let ptr = LLVMBuildGEP(context.builder, captures, indices.as_mut_ptr(), indices.len() as u32, &0);
                 LLVMBuildStore(context.builder, match var {
-                    Var::Const(val) => *val,
-                    Var::Mut(val) => *val,
+                    Var::Const(val, _) => *val,
+                    Var::Mut(val, _) => *val,
+                    Var::Ctor(val, _, _, _) => *val,
                 }, ptr);
             }
             let type_ = Type::Function(param_types, Box::new(ret_type));
@@ -365,4 +440,51 @@ unsafe fn codegen_block(exprs: &Vec<Expr>, context: &mut Context) -> Result<(LLV
     }
     context.names.truncate(old_names_len);
     Ok(result)
+}
+
+pub unsafe fn codegen_branching<T, F>(
+    cases: &Vec<(T, Vec<Expr>)>,
+    codegen_test: F,
+    mut type_: Option<Type>,
+    context: &mut Context
+) -> Result<(LLVMValueRef, Type)>
+where F: Fn(&T, &mut Context) -> Result<Vec<(LLVMBasicBlockRef, LLVMValueRef, LLVMBasicBlockRef)>> {
+    let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
+    let mut branches = Vec::new();
+    for (cond, then) in cases {
+        let old_names_len = context.names.len();
+        let test_blocks = codegen_test(cond, context)?;
+        let (branch_val, branch_type) = codegen_block(then, context)?;
+        match type_ {
+            Some(type_) if branch_type != type_ => return Err(Error::ConflictingType(branch_type, type_)),
+            Some(_) => (),
+            None => type_ = Some(branch_type),
+        }
+        let branch_end = LLVMGetInsertBlock(context.builder);
+        branches.push((branch_val, branch_end));
+        context.names.truncate(old_names_len);
+        let else_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+        for (test_block, cond_val, then_block) in test_blocks {
+            LLVMPositionBuilderAtEnd(context.builder, test_block);
+            LLVMBuildCondBr(context.builder, cond_val, then_block, else_block);
+        }
+        LLVMPositionBuilderAtEnd(context.builder, else_block);
+    }
+    let error_c_func_name = CString::new("case_error").unwrap();
+    let error_c_func = LLVMGetNamedFunction(context.module, error_c_func_name.as_ptr());
+    LLVMBuildCall(context.builder, error_c_func, std::ptr::null_mut(), 0, &0);
+    LLVMBuildUnreachable(context.builder);
+    let merge_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+    LLVMPositionBuilderAtEnd(context.builder, merge_block);
+    let phi = LLVMBuildPhi(context.builder, void_ptr_type(), &0);
+    for (mut val, mut block) in branches {
+        LLVMPositionBuilderAtEnd(context.builder, block);
+        LLVMBuildBr(context.builder, merge_block);
+        LLVMAddIncoming(phi, &mut val, &mut block, 1);
+    }
+    LLVMPositionBuilderAtEnd(context.builder, merge_block);
+    Ok((phi, match type_ {
+        Some(t) => t,
+        None => return Err(Error::AmbiguousType),
+    }))
 }

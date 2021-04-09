@@ -7,26 +7,6 @@ use llvm_sys::LLVMIntPredicate::*;
 use llvm_sys::prelude::*;
 use llvm_sys::core::*;
 
-unsafe fn function_value(func: LLVMValueRef, func_type: &Type, context: &mut Context) -> Result<LLVMValueRef> {
-    let llvm_type = get_unboxed_llvm_type(func_type)?;
-    let val = LLVMBuildMalloc(context.builder, llvm_type, &0);
-    LLVMBuildStore(context.builder,
-        LLVMBuildInsertValue(context.builder,
-            LLVMBuildInsertValue(context.builder,
-                LLVMGetUndef(llvm_type),
-                func,
-                0,
-                &0,
-            ),
-            LLVMConstNull(void_ptr_type()),
-            1,
-            &0,
-        ),
-        val,
-    );
-    Ok(codegen_to_void_ptr(val, context))
-}
-
 unsafe fn codegen_box(val: LLVMValueRef, llvm_type: LLVMTypeRef, context: &mut Context) -> LLVMValueRef {
     let ptr = LLVMBuildMalloc(context.builder, llvm_type, &0);
     LLVMBuildStore(context.builder, val, ptr);
@@ -114,8 +94,8 @@ unsafe fn codegen_primitive<F>(
         None => type_,
         Some(type_params) => Type::Forall(type_params, Box::new(type_)),
     };
-    let var = Var::Const(codegen_to_void_ptr(val, context));
-    context.names.push((name.to_string(), var, type_));
+    let var = Var::Const(codegen_to_void_ptr(val, context), type_);
+    context.names.push((name.to_string(), var));
     Ok(())
 }
 
@@ -137,7 +117,7 @@ unsafe fn codegen_primitive_function<F>(
         None => func_type,
         Some(type_params) => Type::Forall(type_params, Box::new(func_type)),
     };
-    context.names.push((name.to_string(), Var::Const(val), type_));
+    context.names.push((name.to_string(), Var::Const(val, type_)));
     Ok(())
 }
 

@@ -6,6 +6,7 @@ use unic_ucd_common::is_white_space;
 pub enum Token {
     IntLiteral(i64),
     Ident(String),
+    Wildcard,
     PriKeyword(String),
     SecKeyword(String),
     LParen,
@@ -249,7 +250,11 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
                         return Err(Error::UnexpectedChar(c));
                     }
                 }
-                Ident(s)
+                if s == "_" {
+                    Wildcard
+                } else {
+                    Ident(s)
+                }
             }
         },
         _ => return Err(Error::UnexpectedChar(c)),

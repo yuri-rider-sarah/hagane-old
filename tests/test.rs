@@ -91,3 +91,7 @@ test_fail!(array_bounds_put_neg);
 test!(let_polymorphic, "2\n5\n10\n0\n1\n0");
 test!(cond, "3");
 test_fail!(cond_fail);
+test!(match_int, "2\n8");
+test!(match_tuple, "3\n3");
+test!(match_variant, "5\n0");
+test!(match_variant_rec, "1\n2\n3");

@@ -5,6 +5,7 @@ use crate::lexer::*;
 pub enum UExpr {
     IntLiteral(i64),
     Ident(String),
+    Wildcard,
     Tuple(Vec<Expr>),
     Function(Vec<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
@@ -16,10 +17,21 @@ pub enum UExpr {
     Do(Vec<Expr>),
     Lambda(Vec<Expr>, Vec<Expr>),
     Cond(Vec<(Expr, Vec<Expr>)>),
+    Type(String, Vec<(String, Vec<Type>)>),
+    Match(Box<Expr>, Vec<(Pattern, Vec<Expr>)>),
 }
 
 #[derive(Clone, Debug)]
 pub struct Expr(pub UExpr, pub Option<Type>);
+
+#[derive(Clone, Debug)]
+pub enum Pattern {
+    IntLiteral(i64),
+    Ident(String),
+    Wildcard,
+    Tuple(Vec<Pattern>),
+    Variant(String, Vec<Pattern>),
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
@@ -148,6 +160,52 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
             }
             UExpr::Cond(cases)
         },
+        "type" => match &clauses[..] {
+            [Block(name_exprs), Block(variant_exprs)] => {
+                let name = match &name_exprs[..] {
+                    [Expr(UExpr::Ident(name), None)] => name.clone(),
+                    _ => return Err(Error::InvalidExpr),
+                };
+                let mut variants = Vec::new();
+                for variant_expr in variant_exprs {
+                    variants.push(match variant_expr {
+                        Expr(UExpr::Call(name_expr, arg_exprs), None) => match &**name_expr {
+                            Expr(UExpr::Ident(name), None) => {
+                                let mut args = Vec::new();
+                                for arg_expr in arg_exprs {
+                                    args.push(expr_to_type(arg_expr.clone())?);
+                                };
+                                (name.clone(), args)
+                            },
+                            _ => return Err(Error::InvalidExpr),
+                        },
+                        _ => return Err(Error::InvalidExpr),
+                    });
+                }
+                UExpr::Type(name, variants)
+            },
+            _ => return Err(Error::InvalidExpr),
+        },
+        "match" => {
+            if clauses.len() % 2 != 1 {
+                return Err(Error::InvalidExpr);
+            }
+            let val = match &clauses[0] {
+                Block(val) => match &val[..] {
+                    [val] => val.clone(),
+                    _ => return Err(Error::InvalidExpr),
+                },
+                _ => return Err(Error::InvalidExpr),
+            };
+            let mut cases = Vec::new();
+            for i in 0 .. clauses.len() / 2 {
+                match (&clauses[2 * i + 1], &clauses[2 * i + 2]) {
+                    (Label(pattern), Block(case)) => cases.push((expr_to_pattern(pattern.clone())?, case.clone())),
+                    _ => return Err(Error::InvalidExpr),
+                }
+            }
+            UExpr::Match(Box::new(val), cases)
+        }
         _ => return Err(Error::InvalidExpr),
     })
 }
@@ -156,6 +214,7 @@ fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
     let uexpr = match read_token(tokens)? {
         Token::IntLiteral(n) => UExpr::IntLiteral(n),
         Token::Ident(n) => UExpr::Ident(n),
+        Token::Wildcard => UExpr::Wildcard,
         Token::Hash => UExpr::Tuple(read_arg_list(tokens)?),
         Token::DoubleDagger => {
             let params = read_arg_list_c(tokens)?;
@@ -479,6 +538,36 @@ fn expr_to_type(Expr(uexpr, type_): Expr) -> Result<Type> {
             Type::Applied(Box::new(expr_to_type(*base_expr)?), params)
         },
         _ => return Err(Error::InvalidType(Expr(uexpr, type_))),
+    })
+}
+
+fn expr_to_pattern(Expr(uexpr, type_): Expr) -> Result<Pattern> {
+    if type_ != None {
+        return Err(Error::InvalidPattern(Expr(uexpr, type_)));
+    }
+    Ok(match uexpr {
+        UExpr::IntLiteral(n) => Pattern::IntLiteral(n),
+        UExpr::Ident(name) => Pattern::Ident(name.clone()),
+        UExpr::Wildcard => Pattern::Wildcard,
+        UExpr::Tuple(pattern_exprs) => {
+            let mut patterns = Vec::new();
+            for pattern_expr in pattern_exprs {
+                patterns.push(expr_to_pattern(pattern_expr)?);
+            }
+            Pattern::Tuple(patterns)
+        },
+        UExpr::Call(ctor_expr, param_exprs) => {
+            let mut params = Vec::new();
+            for param_expr in param_exprs {
+                params.push(expr_to_pattern(param_expr)?);
+            }
+            let ctor_name = match *ctor_expr {
+                Expr(UExpr::Ident(name), None) => name.to_string(),
+                _ => return Err(Error::InvalidPattern(*ctor_expr)),
+            };
+            Pattern::Variant(ctor_name, params)
+        },
+        _ => return Err(Error::InvalidPattern(Expr(uexpr, type_))),
     })
 }
 
