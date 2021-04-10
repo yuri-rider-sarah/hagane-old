@@ -83,11 +83,27 @@ unsafe fn codegen_pattern_test(
         },
         Variant(ctor, patterns) => {
             let (tag, subtypes) = match resolve_name(&context.names, &**ctor)? {
-                Var::Ctor(_, tag, subtypes, ctor_type) => {
-                    if type_ != &ctor_type {
-                        return Err(Error::ConflictingPatternType);
+                Var::Ctor(_, tag, type_params, subtypes, ret_type) => {
+                    match type_params {
+                        Some(type_params) => {
+                            match type_ {
+                                Type::Applied(base_type, type_args) => {
+                                    if **base_type != ret_type || type_params.len() != type_args.len() {
+                                        return Err(Error::ConflictingPatternType);
+                                    }
+                                    let substitutions = Iterator::zip(type_params.into_iter(), type_args.clone().into_iter()).collect();
+                                    (tag, subtypes.iter().map(|t| substitute_in_type(t, &substitutions)).collect())
+                                },
+                                _ => return Err(Error::ConflictingPatternType),
+                            }
+                        },
+                        None => {
+                            if type_ != &ret_type {
+                                return Err(Error::ConflictingPatternType);
+                            }
+                            (tag, subtypes)
+                        },
                     }
-                    (tag, subtypes)
                 },
                 _ => return Err(Error::NotAConstructor(ctor.to_string())),
             };
@@ -211,7 +227,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             Expr(Ident(name), stated_type) => {
                 let (var, var_type) = match resolve_name(&context.names, name)? {
                     Var::Mut(var, var_type) => (var, var_type),
-                    Var::Const(_, _) | Var::Ctor(_, _, _, _) => return Err(Error::AssignToConst),
+                    Var::Const(_, _) | Var::Ctor(_, _, _, _, _) => return Err(Error::AssignToConst),
                 };
                 let (val, val_type) = codegen_block(exprs, context)?;
                 if val_type != var_type {
@@ -223,9 +239,16 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             },
             _ => return Err(Error::AssignToExpr),
         },
-        Type(type_name, variants) => {
+        Type(type_name, type_params, variants) => {
             for (i, (variant_name, param_types)) in variants.iter().enumerate() {
-                codegen_var_ctor(i as u64, param_types.clone(), Type::Named(type_name.clone()), variant_name, context)?;
+                codegen_var_ctor(
+                    i as u64,
+                    type_params.clone(),
+                    param_types.clone(),
+                    Type::Named(type_name.clone()),
+                    variant_name,
+                    context
+                )?;
             }
             codegen_unit(context)
         },
@@ -345,7 +368,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 captures_types.push(match var {
                     Var::Const(_, _) => void_ptr_type(),
                     Var::Mut(_, _) => LLVMPointerType(void_ptr_type(), 0),
-                    Var::Ctor(_, _, _, _) => void_ptr_type(),
+                    Var::Ctor(_, _, _, _, _) => void_ptr_type(),
                 });
             }
             let func = create_function(context, "lambda", param_types.len())?;
@@ -368,7 +391,8 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 (name.clone(), match var {
                     Var::Const(_, type_) => Var::Const(val, type_.clone()),
                     Var::Mut(_, type_) => Var::Mut(val, type_.clone()),
-                    Var::Ctor(_, i, param_types, ret_type) => Var::Ctor(val, *i, param_types.clone(), ret_type.clone()),
+                    Var::Ctor(_, i, type_params, param_types, ret_type) =>
+                        Var::Ctor(val, *i, type_params.clone(), param_types.clone(), ret_type.clone()),
                 })
             }).collect();
             for (i, (Expr(name, _), param_type)) in Iterator::zip(expr_params.iter(), param_types.iter()).enumerate() {
@@ -394,7 +418,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 LLVMBuildStore(context.builder, match var {
                     Var::Const(val, _) => *val,
                     Var::Mut(val, _) => *val,
-                    Var::Ctor(val, _, _, _) => *val,
+                    Var::Ctor(val, _, _, _, _) => *val,
                 }, ptr);
             }
             let type_ = Type::Function(param_types, Box::new(ret_type));

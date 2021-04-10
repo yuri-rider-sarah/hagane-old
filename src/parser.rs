@@ -17,7 +17,7 @@ pub enum UExpr {
     Do(Vec<Expr>),
     Lambda(Vec<Expr>, Vec<Expr>),
     Cond(Vec<(Expr, Vec<Expr>)>),
-    Type(String, Vec<(String, Vec<Type>)>),
+    Type(String, Option<Vec<String>>, Vec<(String, Vec<Type>)>),
     Match(Box<Expr>, Vec<(Pattern, Vec<Expr>)>),
 }
 
@@ -182,7 +182,37 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
                         _ => return Err(Error::InvalidExpr),
                     });
                 }
-                UExpr::Type(name, variants)
+                UExpr::Type(name, None, variants)
+            },
+            [SecKeyword(fa_kw), Block(type_param_exprs), Block(name_exprs), Block(variant_exprs)] if fa_kw == "∀" => {
+                let name = match &name_exprs[..] {
+                    [Expr(UExpr::Ident(name), None)] => name.clone(),
+                    _ => return Err(Error::InvalidExpr),
+                };
+                let mut type_params = Vec::new();
+                for type_param_expr in type_param_exprs {
+                    type_params.push(match type_param_expr {
+                        Expr(UExpr::Ident(name), None) => name.to_string(),
+                        _ => return Err(Error::InvalidExpr),
+                    });
+                }
+                let mut variants = Vec::new();
+                for variant_expr in variant_exprs {
+                    variants.push(match variant_expr {
+                        Expr(UExpr::Call(name_expr, arg_exprs), None) => match &**name_expr {
+                            Expr(UExpr::Ident(name), None) => {
+                                let mut args = Vec::new();
+                                for arg_expr in arg_exprs {
+                                    args.push(expr_to_type(arg_expr.clone())?);
+                                };
+                                (name.clone(), args)
+                            },
+                            _ => return Err(Error::InvalidExpr),
+                        },
+                        _ => return Err(Error::InvalidExpr),
+                    });
+                }
+                UExpr::Type(name, Some(type_params), variants)
             },
             _ => return Err(Error::InvalidExpr),
         },

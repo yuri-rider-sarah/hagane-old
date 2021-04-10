@@ -12,14 +12,14 @@ pub const BB_C_NAME: *const i8 = b"bb\0" as *const u8 as *const i8;
 pub enum Var {
     Const(LLVMValueRef, Type),
     Mut(LLVMValueRef, Type),
-    Ctor(LLVMValueRef, u64, Vec<Type>, Type),
+    Ctor(LLVMValueRef, u64, Option<Vec<String>>, Vec<Type>, Type),
 }
 
 pub unsafe fn var_value(var: &Var, context: &Context) -> LLVMValueRef {
     match var {
         Var::Const(val, _) => *val,
         Var::Mut(ptr, _) => LLVMBuildLoad(context.builder, *ptr, &0),
-        Var::Ctor(ctor, _, _, _) => *ctor,
+        Var::Ctor(ctor, _, _, _, _) => *ctor,
     }
 }
 
@@ -27,7 +27,19 @@ pub fn var_type(var: Var) -> Type {
     match var {
         Var::Const(_, type_) => type_,
         Var::Mut(_, type_) => type_,
-        Var::Ctor(_, _, param_types, ret_type) => Type::Function(param_types, Box::new(ret_type)),
+        Var::Ctor(_, _, type_params, param_types, ret_type) => match type_params {
+            Some(type_params) => Type::Forall(
+                type_params.clone(),
+                Box::new(Type::Function(
+                    param_types,
+                    Box::new(Type::Applied(
+                        Box::new(ret_type),
+                        type_params.iter().map(|type_param| Type::Named(type_param.clone())).collect(),
+                    )),
+                )),
+            ),
+            None => Type::Function(param_types, Box::new(ret_type)),
+        },
     }
 }
 
@@ -39,7 +51,14 @@ pub unsafe fn get_llvm_variant_type(num_params: usize) -> LLVMTypeRef {
     LLVMStructType(llvm_types.as_mut_ptr(), llvm_types.len() as u32, 0)
 }
 
-pub unsafe fn codegen_var_ctor(tag: u64, param_types: Vec<Type>, ret_type: Type, name: &str, context: &mut Context) -> Result<()> {
+pub unsafe fn codegen_var_ctor(
+    tag: u64,
+    type_params: Option<Vec<String>>,
+    param_types: Vec<Type>,
+    ret_type: Type,
+    name: &str,
+    context: &mut Context
+) -> Result<()> {
     let parent = LLVMGetInsertBlock(context.builder);
     let func = create_function(context, name, param_types.len())?;
     let llvm_type = get_llvm_variant_type(param_types.len());
@@ -55,7 +74,7 @@ pub unsafe fn codegen_var_ctor(tag: u64, param_types: Vec<Type>, ret_type: Type,
     LLVMBuildRet(context.builder, codegen_to_void_ptr(ret_val, context));
     LLVMPositionBuilderAtEnd(context.builder, parent);
     let val = function_value(func, &Type::Function(param_types.clone(), Box::new(ret_type.clone())), context)?;
-    context.names.push((name.to_string(), Var::Ctor(val, tag, param_types, ret_type)));
+    context.names.push((name.to_string(), Var::Ctor(val, tag, type_params, param_types, ret_type)));
     Ok(())
 }
 

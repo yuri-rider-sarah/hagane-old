@@ -1,0 +1,11 @@
+type. ∀,{T} Opt
+    Some(T)
+    None()
+
+match. Some[Int](4)
+.Some(x) print(+(x 1))
+.None() print(0)
+
+match. None[Int]()
+.Some(x) print(+(x 1))
+.None() print(0)
