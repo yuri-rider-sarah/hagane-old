@@ -196,23 +196,41 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                 _ => return Err(Error::NotPolymorphic),
             }
         },
-        Let(type_params, name, exprs, false) => match &**name {
-            Expr(Ident(name), stated_type) => {
-                let (value, monotype) = codegen_block(exprs, context)?;
-                let type_ = match type_params {
-                    None => monotype,
-                    Some(type_params) => Type::Forall(type_params.clone(), Box::new(monotype)),
-                };
-                check_type_compat(stated_type, &type_)?;
-                context.names.push((name.clone(), Var::Const(value, type_)));
+        Let(type_params, pattern, exprs, false) => match type_params {
+            None => {
+                let function = LLVMGetBasicBlockParent(LLVMGetInsertBlock(context.builder));
+                let (value, type_) = codegen_block(exprs, context)?;
+                let test_blocks = codegen_pattern_test(value, &type_, pattern, context)?;
+                let test_end = LLVMGetInsertBlock(context.builder);
+                let else_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+                for (test_block, cond_val, then_block) in test_blocks {
+                    LLVMPositionBuilderAtEnd(context.builder, test_block);
+                    LLVMBuildCondBr(context.builder, cond_val, then_block, else_block);
+                }
+                LLVMPositionBuilderAtEnd(context.builder, else_block);
+                let error_c_func_name = CString::new("case_error").unwrap();
+                let error_c_func = LLVMGetNamedFunction(context.module, error_c_func_name.as_ptr());
+                LLVMBuildCall(context.builder, error_c_func, std::ptr::null_mut(), 0, &0);
+                LLVMBuildUnreachable(context.builder);
+                let merge_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+                LLVMPositionBuilderAtEnd(context.builder, test_end);
+                LLVMBuildBr(context.builder, merge_block);
+                LLVMPositionBuilderAtEnd(context.builder, merge_block);
                 codegen_unit(context)
             },
-            _ => return Err(Error::AssignToExpr),
+            Some(type_params) => match pattern {
+                Pattern::Ident(name) => {
+                    let (value, monotype) = codegen_block(exprs, context)?;
+                    let type_ = Type::Forall(type_params.clone(), Box::new(monotype));
+                    context.names.push((name.clone(), Var::Const(value, type_)));
+                    codegen_unit(context)
+                },
+                _ => return Err(Error::AssignToExpr),
+            },
         },
-        Let(None, name, exprs, true) => match &**name {
-            Expr(Ident(name), stated_type) => {
+        Let(None, pattern, exprs, true) => match pattern {
+            Pattern::Ident(name) => {
                 let (value, type_) = codegen_block(exprs, context)?;
-                check_type_compat(stated_type, &type_)?;
                 let c_name = CString::new(&name[..]).unwrap();
                 let ptr = LLVMBuildMalloc(context.builder, void_ptr_type(), c_name.as_ptr());
                 LLVMBuildStore(context.builder, value, ptr);

@@ -1,0 +1,6 @@
+type. ∀,{T} Option
+    Some(T)
+    None()
+
+let. Some(x) None[Int]()
+print(x)

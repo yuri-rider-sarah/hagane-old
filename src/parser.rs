@@ -10,7 +10,7 @@ pub enum UExpr {
     Function(Vec<Expr>, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Monomorphic(Box<Expr>, Vec<Type>),
-    Let(Option<Vec<String>>, Box<Expr>, Vec<Expr>, bool),
+    Let(Option<Vec<String>>, Pattern, Vec<Expr>, bool),
     Set(Box<Expr>, Vec<Expr>),
     If(Vec<Expr>, Vec<Expr>, Vec<Expr>),
     While(Vec<Expr>, Vec<Expr>),
@@ -75,11 +75,11 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
     Ok(match &keyword[..] {
         "let" => match &clauses[..] {
             [Block(var), Block(val)] => match &var[..] {
-                [var] => UExpr::Let(None, Box::new(var.clone()), val.clone(), false),
+                [var] => UExpr::Let(None, expr_to_pattern(var.clone())?, val.clone(), false),
                 _ => return Err(Error::InvalidExpr),
             },
             [SecKeyword(mut_kw), Block(var), Block(val)] if mut_kw == "mut" => match &var[..] {
-                [var] => UExpr::Let(None, Box::new(var.clone()), val.clone(), true),
+                [var] => UExpr::Let(None, expr_to_pattern(var.clone())?, val.clone(), true),
                 _ => return Err(Error::InvalidExpr),
             },
             [SecKeyword(fa_kw), Block(type_param_exprs), Block(var), Block(val)] if fa_kw == "∀" => match &var[..] {
@@ -94,7 +94,7 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
                             _ => return Err(Error::InvalidExpr),
                         }
                     }
-                    UExpr::Let(Some(type_params), Box::new(var.clone()), val.clone(), false)
+                    UExpr::Let(Some(type_params), expr_to_pattern(var.clone())?, val.clone(), false)
                 },
                 _ => return Err(Error::InvalidExpr),
             },

@@ -97,3 +97,7 @@ test!(match_variant, "5\n0");
 test!(match_variant_rec, "1\n2\n3");
 test!(match_variant_poly, "5\n0");
 test!(match_variant_rec_poly, "1\n2\n3");
+test_fail!(match_int_fail);
+test!(let_tuple, "1\n2\n3");
+test!(let_variant, "3");
+test_fail!(let_variant_fail);
