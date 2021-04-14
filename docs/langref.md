@@ -1,4 +1,4 @@
-# Hagane Language Reference (version 0.0.3)
+# Hagane Language Reference (version 0.0.4)
 
 ## 1. Tokens
 A program consists of a sequence of tokens. Whitespace characters may occur anywhere between tokens, and are used to separate them.
@@ -6,7 +6,7 @@ A program consists of a sequence of tokens. Whitespace characters may occur anyw
 ### 1.1. Identifiers
 An identifier may consist of characters with Unicode General Category L\* (Letter), M\* (Mark), N\* (Number), Pc (Punctuation, Connector), Pd (Punctuation, Dash), or S\* (Symbol).
 The following characters from category Po (Punctuation, Other) are also permitted: `%&*/\؉؊٪‰‱′″‴‵‶‷⁂⁗⁎⁑⁕﹠﹡﹨﹪％＆＊／＼`
-However, identifiers may not begin with a numeric character (with General Category N\*).
+However, identifiers may not begin with a numeric character (with General Category N\*) or consist of a single undescore.
 
 ### 1.2. Keywords
 Keywords are distinguished from identifiers by ending in a period or a comma.
@@ -18,9 +18,11 @@ Primary keywords end in a period, while secondary keywords end in a comma.
 Integer literals consist of digits `0`-`9`.
 
 ### 1.4. Other tokens
-The following characters represent tokens: `(`, `)`, `[`, `]`, `{`, `}`, `'`, `:`, `#`.
+The following characters represent tokens: `(`, `)`, `[`, `]`, `{`, `}`, `'`, `:`, `#`, `.`.
 
-They don't need to be separated from other tokens with whitespace, except for `#`, which has to be separated from the left.
+They don't need to be separated from other tokens with whitespace, except for `#` and `.`, which have to be separated from the left.
+
+An identifier consisting of single undescore is a special token, acting as a wildcard in pattern matching expressions.
 
 ### 1.5. Comments
 Comments are marked with the character `※` and last until the end of the line.
@@ -52,6 +54,9 @@ Nonempty tuples are useless in the current version, as there is no way to decons
 ```
 This is the type of a function taking n arguments of types `<type_1>` through `<type_n>` and returning a value of type `<type_ret>`.
 
+### 2.4. Custom types
+Custom types can be defined with the `type.` expression.
+
 ## 3. Syntax
 The basic element of Hagane syntax is the expression. Each expression evaluates to a value.
 
@@ -77,7 +82,7 @@ This creates an n-tuple containing the values of `<expr_1>` through `<expr_n>`.
 The subexpressions are evaluated left-to-right.
 
 ### 3.4. Special expressions
-Special expressions are used for all other expressions. A special expression consists of a primary keyword and a series of clauses, where each clause is either a secondary keyword or a block.
+Special expressions are used for all other expressions. A special expression consists of a primary keyword and a series of clauses, where each clause is either a secondary keyword, a label, or a block.
 
 #### 3.4.1. Block syntax
 A block consists of a series of expressions, either surrounded by braces or indented. A block consisting of a single expression may also be written as just the expression.
@@ -98,26 +103,30 @@ To determine if a line starts an indented block, its indentation level is compar
 <expr>
 ```
 
-#### 3.4.2. Block evaluation
+#### 3.4.2. Labels
+
+A label consists of a `.` token followed by an expression.
+
+#### 3.4.3. Block evaluation
 
 How a block is interpreted depends on the special expression to which it belongs.
 However, many special expressions will use blocks in the same way, which is referred to as evaluating them.
 
 To evaluate a block, each expression is evaluated, and the value of the last expression is returned. A block with no expressions evaluates to `#()`.
 
-#### 3.4.3. Standard special expression syntax
+#### 3.4.4. Standard special expression syntax
 ```
 <keyword>(<clause_1> ... <clause_n>)
 ```
 This is the standard syntax for special expressions.
 
-#### 3.4.4. Block special expression syntax
+#### 3.4.5. Block special expression syntax
 ```
 <keyword> <clause_1> ... <clause_n>
 ```
 A special expression may be written without the parentheses at the top level of a block or program.
 
-The first line after the primary keyword that doesn't continue an earlier clause or start with a secondary keyword is considered to belong to the next expression.
+The first line after the primary keyword that doesn't continue an earlier clause or start with a secondary keyword or label is considered to belong to the next expression.
 
 For example, the following consists of two expressions — an `if.` special expression and a call to `print`:
 ```
@@ -128,7 +137,7 @@ else, print(0)
 print(y)
 ```
 
-#### 3.4.5. Clause special expression syntax
+#### 3.4.6. Clause special expression syntax
 ```
 <keyword> <clause_1> ... <clause_n>
 ```
@@ -136,7 +145,7 @@ A special expression may also be written without the parentheses when it occurs 
 
 The first line after the primary keyword that doesn't continue an earlier clause is considered to belong to the next expression.
 
-Part of the expression may be indented. Lines within the indented part may start with a secondary keyword or continue an eariler clause.
+Part of the expression may be indented. Lines within the indented part may start with a secondary keyword or label or continue an eariler clause.
 The end of the indented part marks the end of the expression.
 
 For example, the following code contains two `if.` expressions, one nested inside the second block of another:
@@ -175,25 +184,65 @@ do. <block>
 ```
 The block `<block>` is evaluated.
 
-### 4.2. `let.`
+### 4.2. `type.`
 ```
-let. [mut,] [∀, <type_params>] <identifier> <expr>
+type. [∀, <type_params>] <name> {<variant_1> ... <variant_n>}
 ```
-`<identifier>` must consist of a single identifier.
+Each `<variant_k>` must be of the form `<variant_name_k>(<type_k_1> ... <type_k_m>)`, where each `<type_k_l>` is a valid type.
 
-The variable `<identifier>` is declared and bound to the value of `<expr>`.
+Declares a type with `n` variants, the `k`th containing elements of types `<type_k_1>` through `<type_k_l>`.
 
-The same variable may be declared multiple times, in which case the later declarations shadow earlier ones.
+If `∀, <type_params>` is used, the type and its variants will be polymorphic, taking type parameters `<type_params>`.
+
+### 4.3, `match.`
+```
+match. <expr> .<pattern_1> <case_1> ... .<pattern_n> <case_n>
+```
+Each `<pattern_k>` must be a valid pattern, and all `<case_k>` blocks must have the same type.
+
+`<expr>` is evaluated and matched against each pattern in the order that they appear.
+For the first pattern `<pattern_k>` that matches, the `<body_k>` block associated with it is evaluated with the appropriate bindings and its value returned from the expression.
+
+If no pattern matches, an error occurs.
+
+#### 4.3.1. Patterns
+A pattern is an integer literal, identifier, wildcard, tuple of patterns or variant pattern.
+
+An integer literal pattern matches an integer of the same value.
+
+An identifier pattern matches any value, binding it to the identifier.
+
+A wildcard pattern matches any value, without creating any bindings.
+
+A tuple pattern has form `#(<pattern_1> ... <pattern_n>)`.
+It matches tuples of `n` elements, matching each element to the appropriate subpattern.
+
+A variant pattern has form `<variant_name>(<pattern_1> ... <pattern_n>)`.
+It matches instances of the variant named `<variant_name>`, matching each element to the appropriate subpattern.
+
+### 4.4. `let.`
+```
+let. [mut,] [∀, <type_params>] <pattern> <expr>
+```
+`<pattern>` must be a valid pattern.
+
+`<expr>` is matched against `<pattern>` and the appropriate bindings created.
+
+If the pattern doesn't match, an error occurs.
+
+If `mut,` or `∀,` is used, `<pattern>` must be an identifier.
 
 If `mut,` is used, the declared variable will be mutable.
 
 If `∀, <type_params>` is used, the declared variable will be polymorphic, taking type parameters `<type_params>`.
 
+The same variable may be declared multiple times, in which case the later declarations shadow earlier ones.
+
 A variable cannot be both polymorphic and mutable.
 
 The type of this expression is `#()`.
 
-### 4.3. `set.`
+### 4.5. `set.`
 ```
 set. <identifier> <expr>
 ```
@@ -203,7 +252,7 @@ This changes the value of variable `<identifier>` to the value of `<expr>`.
 
 The type of this expression is `#()`.
 
-### 4.4. `if.`
+### 4.6. `if.`
 ```
 if. <cond> then, <consequent> else, <alternative>
 ```
@@ -213,7 +262,18 @@ First, `<cond>` is evaluated.
 If the resulting value is `⊤`, `<consequent>` is evaluated and its value returned.
 Otherwise the resulting value is `⊥`, in which case `<alternative>` is evaluated and its value returned.
 
-### 4.5. `while.`
+### 4.7. `cond.`
+```
+cond. .<test_1> <body_1> ... .<test_n> <body_n>
+```
+Each `<test_k>` must have type `Bool`, and all `<body_n>` blocks must have the same type.
+
+Each `<test_k>` is evaluated in order.
+For the first test `<pattern_k>` that evaluates to `⊤`, the `<body_k>` block associated with it is evaluated with the appropriate bindings and its value returned from the expression.
+
+If no condition holds, an error occurs.
+
+### 4.8. `while.`
 ```
 while. <cond> do, <body>
 ```
@@ -223,7 +283,7 @@ while. <cond> do, <body>
 
 The type of this expression is `#()`.
 
-### 4.6. `λ.`
+### 4.9. `λ.`
 ```
 λ. <vars> ⇒, <body>
 ```
