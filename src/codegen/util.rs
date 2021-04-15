@@ -84,6 +84,12 @@ pub struct Context {
     pub names: Vec<(String, Var)>
 }
 
+pub unsafe fn codegen_box(val: LLVMValueRef, llvm_type: LLVMTypeRef, context: &mut Context) -> LLVMValueRef {
+    let ptr = LLVMBuildMalloc(context.builder, llvm_type, &0);
+    LLVMBuildStore(context.builder, val, ptr);
+    codegen_to_void_ptr(ptr, context)
+}
+
 pub unsafe fn function_value(func: LLVMValueRef, func_type: &Type, context: &mut Context) -> Result<LLVMValueRef> {
     let llvm_type = get_unboxed_llvm_type(func_type)?;
     let val = LLVMBuildMalloc(context.builder, llvm_type, &0);
@@ -112,6 +118,28 @@ pub unsafe fn create_function(context: &mut Context, name: &str, params_num: usi
     let entry = LLVMAppendBasicBlock(func, ENTRY_C_NAME);
     LLVMPositionBuilderAtEnd(context.builder, entry);
     Ok(func)
+}
+
+pub unsafe fn codegen_decompose_list(list: LLVMValueRef, context: &mut Context) -> (LLVMValueRef, LLVMValueRef) {
+    (LLVMBuildExtractValue(context.builder, list, 0, &0), LLVMBuildExtractValue(context.builder, list, 1, &0))
+}
+
+pub unsafe fn codegen_compose_list(
+    length: LLVMValueRef,
+    contents: LLVMValueRef,
+    context: &mut Context
+) -> LLVMValueRef {
+    LLVMBuildInsertValue(context.builder,
+        LLVMBuildInsertValue(context.builder,
+            LLVMGetUndef(list_type()),
+            length,
+            0,
+            &0,
+        ),
+        contents,
+        1,
+        &0,
+    )
 }
 
 pub unsafe fn codegen_to_void_ptr(val: LLVMValueRef, context: &mut Context) -> LLVMValueRef {

@@ -101,3 +101,4 @@ test_fail!(match_int_fail);
 test!(let_tuple, "1\n2\n3");
 test!(let_variant, "3");
 test_fail!(let_variant_fail);
+test!(list_literal, "1\n2\n3\n4");

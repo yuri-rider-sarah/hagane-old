@@ -7,12 +7,6 @@ use llvm_sys::LLVMIntPredicate::*;
 use llvm_sys::prelude::*;
 use llvm_sys::core::*;
 
-unsafe fn codegen_box(val: LLVMValueRef, llvm_type: LLVMTypeRef, context: &mut Context) -> LLVMValueRef {
-    let ptr = LLVMBuildMalloc(context.builder, llvm_type, &0);
-    LLVMBuildStore(context.builder, val, ptr);
-    codegen_to_void_ptr(ptr, context)
-}
-
 unsafe fn codegen_check(
     cond: LLVMValueRef,
     error_c_func: LLVMValueRef,
@@ -57,28 +51,6 @@ unsafe fn codegen_copy_loop(
     LLVMAddIncoming(i, &mut i1, &mut loop_block, 1);
     LLVMBuildBr(context.builder, test_block);
     LLVMPositionBuilderAtEnd(context.builder, after_block);
-}
-
-unsafe fn codegen_decompose_list(list: LLVMValueRef, context: &mut Context) -> (LLVMValueRef, LLVMValueRef) {
-    (LLVMBuildExtractValue(context.builder, list, 0, &0), LLVMBuildExtractValue(context.builder, list, 1, &0))
-}
-
-unsafe fn codegen_compose_list(
-    length: LLVMValueRef,
-    contents: LLVMValueRef,
-    context: &mut Context
-) -> LLVMValueRef {
-    LLVMBuildInsertValue(context.builder,
-        LLVMBuildInsertValue(context.builder,
-            LLVMGetUndef(list_type()),
-            length,
-            0,
-            &0,
-        ),
-        contents,
-        1,
-        &0,
-    )
 }
 
 unsafe fn codegen_primitive<F>(

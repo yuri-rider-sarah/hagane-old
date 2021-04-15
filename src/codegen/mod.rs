@@ -155,6 +155,27 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             }
             (codegen_to_void_ptr(tuple, context), type_)
         },
+        List(exprs) => {
+            let mut type_ = stated_type.clone();
+            let length = LLVMConstInt(LLVMInt64Type(), exprs.len() as u64, 0);
+            let contents = LLVMBuildArrayMalloc(context.builder, void_ptr_type(), length, &0);
+            for (i, expr) in exprs.iter().enumerate() {
+                let (elem, elem_type) = codegen_block(expr, context)?;
+                match type_ {
+                    Some(type_) if elem_type != type_ => return Err(Error::ConflictingType(elem_type, type_.clone())),
+                    Some(_) => (),
+                    None => type_ = Some(elem_type),
+                }
+                LLVMBuildStore(context.builder,
+                    elem,
+                    LLVMBuildGEP(context.builder, contents, &mut LLVMConstInt(LLVMInt32Type(), i as u64, 0), 1, &0)
+                );
+            }
+            (codegen_box(codegen_compose_list(length, contents, context), list_type(), context), match type_ {
+                Some(type_) => Type::Applied(Box::new(Type::Named("List".to_string())), vec![type_]),
+                None => return Err(Error::AmbiguousType),
+            })
+        },
         Function(_, _) => return Err(Error::InvalidExpr),
         Call(func, args) => {
             let (func_val_ptr, func_type) = codegen(func, context)?;

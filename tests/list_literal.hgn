@@ -1,0 +1,5 @@
+let. a list.(1 2 3 4)
+let. mut, i 0
+while. <(i len[Int](a))
+    print(get[Int](a i))
+    set. i +(i 1)

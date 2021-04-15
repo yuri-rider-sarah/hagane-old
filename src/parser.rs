@@ -19,6 +19,7 @@ pub enum UExpr {
     Cond(Vec<(Expr, Vec<Expr>)>),
     Type(String, Option<Vec<String>>, Vec<(String, Vec<Type>)>),
     Match(Box<Expr>, Vec<(Pattern, Vec<Expr>)>),
+    List(Vec<Vec<Expr>>),
 }
 
 #[derive(Clone, Debug)]
@@ -235,7 +236,17 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
                 }
             }
             UExpr::Match(Box::new(val), cases)
-        }
+        },
+        "list" => {
+            let mut elements = Vec::new();
+            for clause in clauses {
+                match clause {
+                    Block(element) => elements.push(element.clone()),
+                    _ => return Err(Error::InvalidExpr),
+                }
+            }
+            UExpr::List(elements)
+        },
         _ => return Err(Error::InvalidExpr),
     })
 }
