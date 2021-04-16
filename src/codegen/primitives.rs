@@ -197,13 +197,13 @@ pub unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
     codegen_binary_cmp_primitive(">", LLVMIntSGT, context)?;
     codegen_binary_cmp_primitive("≥", LLVMIntSGE, context)?;
     let print_c_func = {
-        let c_func_name = CString::new("print").unwrap();
+        let c_func_name = CString::new("print_int").unwrap();
         let mut func_param_types = vec![LLVMInt64Type()];
         let llvm_c_func_type = LLVMFunctionType(LLVMVoidType(), func_param_types.as_mut_ptr(), func_param_types.len() as u32, 0);
         LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
     };
     codegen_primitive_function(
-        "print",
+        "print_int",
         None,
         vec![Type::Named("Int".to_string())],
         Type::Tuple(Vec::new()),
@@ -215,12 +215,12 @@ pub unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
         context,
     )?;
     let read_c_func = {
-        let c_func_name = CString::new("read").unwrap();
+        let c_func_name = CString::new("read_int").unwrap();
         let llvm_c_func_type = LLVMFunctionType(LLVMInt64Type(), std::ptr::null_mut(), 0, 0);
         LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
     };
     codegen_primitive_function(
-        "read",
+        "read_int",
         None,
         vec![],
         Type::Named("Int".to_string()),

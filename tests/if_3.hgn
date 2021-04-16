@@ -1,5 +1,5 @@
-    print(1)
+    print_int(1)
 if. ⊤
-    print(0)
+    print_int(0)
 else,
-    print(1)
+    print_int(1)

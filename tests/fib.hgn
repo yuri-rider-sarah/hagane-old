@@ -10,4 +10,4 @@ set. fib λ.{n 'Int}
         set. i +(i 1)
     a 'Int
 
-print(fib(92))
+print_int(fib(92))

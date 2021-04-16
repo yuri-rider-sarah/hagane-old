@@ -14,4 +14,4 @@ let. x {
     }
 }
 
-print(x)
+print_int(x)

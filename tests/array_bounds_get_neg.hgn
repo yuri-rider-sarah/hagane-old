@@ -2,4 +2,4 @@ let. mut, a empty[Int]
 set. a push[Int](a 1)
 set. a push[Int](a 2)
 set. a push[Int](a 3)
-print(get[Int](a -(0 1)))
+print_int(get[Int](a -(0 1)))

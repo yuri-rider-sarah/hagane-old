@@ -1,7 +1,7 @@
 let. mut, x 0
 if. =(x 1)
 	set. x 3
-	print(2)
+	print_int(2)
 else,
 	set. x +(x 1)
-	print(x)
+	print_int(x)

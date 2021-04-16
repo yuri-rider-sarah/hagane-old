@@ -3,9 +3,9 @@ type. ∀,{T} Opt
     None()
 
 match. Some[Int](4)
-.Some(x) print(+(x 1))
-.None() print(0)
+.Some(x) print_int(+(x 1))
+.None() print_int(0)
 
 match. None[Int]()
-.Some(x) print(+(x 1))
-.None() print(0)
+.Some(x) print_int(+(x 1))
+.None() print_int(0)

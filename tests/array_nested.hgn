@@ -13,6 +13,6 @@ let. mut, i 0
 while. <(i 3)
     let. mut, j 0
     while. <(j 3)
-        print(get[Int](get[List(Int)](a i) j))
+        print_int(get[Int](get[List(Int)](a i) j))
         set. j +(j 1)
     set. i +(i 1)

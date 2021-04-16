@@ -6,7 +6,7 @@ let. mut, l Cons(1 Cons(2 Cons(3 Nil())))
 while.
     match. l
     .Cons(h t)
-        print(h)
+        print_int(h)
         set. l t
         ⊤
     .Nil()

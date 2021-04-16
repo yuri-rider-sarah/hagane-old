@@ -3,4 +3,4 @@ let. mut, y 2
 set. y 3
 set. x +(x y)
 set. y +(x y)
-print(+(x y))
+print_int(+(x y))

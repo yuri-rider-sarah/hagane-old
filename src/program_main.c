@@ -19,11 +19,11 @@ void case_error(void) {
     error("Inexhaustive cases");
 }
 
-void print(int64_t n) {
+void print_int(int64_t n) {
     printf("%"PRId64"\n", n);
 }
 
-int64_t read(void) {
+int64_t read_int(void) {
     int64_t n;
     if (scanf("%"SCNd64, &n) != 1)
         error("Failed to read integer");

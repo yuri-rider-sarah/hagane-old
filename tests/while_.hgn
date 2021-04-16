@@ -3,5 +3,5 @@ let. mut, y 200
 while. >(x 0)
     set. x -(x 1)
     set. y +(y 1)
-print(x)
-print(y)
+print_int(x)
+print_int(y)

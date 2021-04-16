@@ -4,4 +4,4 @@ let. x cond.
     .<(1 2) 3
     .⊤ 4
 
-print(x)
+print_int(x)

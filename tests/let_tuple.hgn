@@ -1,4 +1,4 @@
 let. #(x y z) #(1 2 3)
-print(x)
-print(y)
-print(z)
+print_int(x)
+print_int(y)
+print_int(z)

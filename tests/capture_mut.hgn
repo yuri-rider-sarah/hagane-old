@@ -3,6 +3,6 @@ let. mut, x 1
 let. incr_x λ.{}
     set.(x +(x 1)) '#()
 
-print(x)
+print_int(x)
 incr_x()
-print(x)
+print_int(x)

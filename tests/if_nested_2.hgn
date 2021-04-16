@@ -4,4 +4,4 @@ let. x
     else,
         if. >(0 1) 2 3
 
-print(x)
+print_int(x)

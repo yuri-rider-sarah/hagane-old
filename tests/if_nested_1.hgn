@@ -10,4 +10,4 @@ let. x
         else,
             3
 
-print(x)
+print_int(x)

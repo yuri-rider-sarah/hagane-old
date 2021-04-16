@@ -28,5 +28,5 @@ set. a push[Int](a 3)
 let. b map[Int Int](a ∘[Int Int Int](succ square))
 let. c map[Int Int](a ∘[Int Bool Int](bool→int λ.(n'Int ⇒, =(%(n 2) 0) 'Bool)))
 
-foreach[Int](b print)
-foreach[Int](c print)
+foreach[Int](b print_int)
+foreach[Int](c print_int)

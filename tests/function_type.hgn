@@ -1,3 +1,3 @@
-let. print′ print '‡(Int : #())
+let. print_int′ print_int '‡(Int : #())
 
-print′(1)
+print_int′(1)

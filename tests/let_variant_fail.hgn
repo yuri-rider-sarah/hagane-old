@@ -3,4 +3,4 @@ type. ∀,{T} Option
     None()
 
 let. Some(x) None[Int]()
-print(x)
+print_int(x)

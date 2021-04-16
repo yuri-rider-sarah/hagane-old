@@ -4,4 +4,4 @@ let. f λ. {x'Int y'Int}
         +(x +(y +(z w))) 'Int
     g(1 5) 'Int
 
-print(f(2 6))
+print_int(f(2 6))

@@ -2,12 +2,12 @@ let. x 4
 let. y 2
 
 match. x
-.1 print(0)
+.1 print_int(0)
 .2 match. y
-    .2 print(1)
-    ._ print(2)
+    .2 print_int(1)
+    ._ print_int(2)
 .4 match. y
-    .1 print(3)
-    .2 print(4)
-    ._ print(5)
-._ print(6)
+    .1 print_int(3)
+    .2 print_int(4)
+    ._ print_int(5)
+._ print_int(6)
