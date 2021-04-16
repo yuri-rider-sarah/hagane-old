@@ -104,3 +104,4 @@ test_fail!(let_variant_fail);
 test!(list_literal, "1\n2\n3\n4");
 test!(match_list, "7");
 test!(match_nested, "4");
+test!(char_literal, "97\n33\n32\n41\n92\n10\n960\n8595\n128512");

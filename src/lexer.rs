@@ -5,6 +5,7 @@ use unic_ucd_common::is_white_space;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     IntLiteral(i64),
+    CharLiteral(char),
     Ident(String),
     Wildcard,
     PriKeyword(String),
@@ -116,6 +117,18 @@ fn skip_comment(chars: &Vec<char>, state: &mut LexerState) {
     }
 }
 
+fn read_quoted_char(chars: &Vec<char>, state: &mut LexerState) -> Result<char> {
+    Ok(match read_char(chars, state) {
+        Some('\\') => match read_char(chars, state) {
+            Some('\\') => '\\',
+            Some('n') => '\n',
+            c => return Err(Error::UnexpectedChar(c)),
+        },
+        Some(c) => c,
+        None => return Err(Error::UnexpectedChar(None)),
+    })
+}
+
 fn read_indent(chars: &Vec<char>, state: &mut LexerState) -> Result<usize> {
     let mut indent_depth = 0;
     while let Some(c0) = read_char(chars, state) {
@@ -210,9 +223,16 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
         '}' => RBrace,
         '\'' => Apostrophe,
         ':' => Colon,
-        '#' => Hash,
         '‡' => DoubleDagger,
         '.' => Period,
+        '#' => match read_char(chars, state) {
+            Some('!') => CharLiteral(read_quoted_char(chars, state)?),
+            Some(_) => {
+                state.pos -= 1;
+                Hash
+            },
+            None => Hash,
+        },
         '0'..='9' => {
             let mut n = 0;
             while let Some(c0) = c {

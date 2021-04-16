@@ -255,6 +255,7 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
 fn read_simple_expr(tokens: &mut Tokens) -> Result<Expr> {
     let uexpr = match read_token(tokens)? {
         Token::IntLiteral(n) => UExpr::IntLiteral(n),
+        Token::CharLiteral(c) => UExpr::IntLiteral(c as i64),
         Token::Ident(n) => UExpr::Ident(n),
         Token::Wildcard => UExpr::Wildcard,
         Token::Hash => UExpr::Tuple(read_arg_list(tokens)?),
