@@ -128,6 +128,33 @@ unsafe fn codegen_pattern_test(
             }
             branches
         },
+        List(patterns) => {
+            let elem_type = match type_ {
+                Type::Applied(type_list, elem_type)
+                    if **type_list == Type::Named("List".to_string()) && elem_type.len() == 1 => 
+                        elem_type[0].clone(),
+                _ => return Err(Error::ConflictingPatternType),
+            };
+            let (length, contents) = codegen_decompose_list(codegen_load(val, list_type(), context), context);
+            let length_test = LLVMBuildICmp(context.builder,
+                LLVMIntEQ,
+                length,
+                LLVMConstInt(LLVMInt64Type(), patterns.len() as u64, 0),
+                &0
+            );
+            let then_block = LLVMAppendBasicBlock(function, BB_C_NAME);
+            LLVMPositionBuilderAtEnd(context.builder, then_block);
+            let mut branches = vec![(parent_block, length_test, then_block)];
+            for (i, subpattern) in patterns.iter().enumerate() {
+                let mut indices = vec![LLVMConstInt(LLVMInt64Type(), i as u64, 0)];
+                let subval = LLVMBuildLoad(context.builder,
+                    LLVMBuildGEP(context.builder, contents, indices.as_mut_ptr(), indices.len() as u32, &0),
+                    &0,
+                );
+                branches.append(&mut codegen_pattern_test(subval, &elem_type, subpattern, context)?);
+            }
+            branches
+        },
     })
 }
 

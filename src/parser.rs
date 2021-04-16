@@ -32,6 +32,7 @@ pub enum Pattern {
     Wildcard,
     Tuple(Vec<Pattern>),
     Variant(String, Vec<Pattern>),
+    List(Vec<Pattern>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -586,7 +587,7 @@ fn expr_to_pattern(Expr(uexpr, type_): Expr) -> Result<Pattern> {
     if type_ != None {
         return Err(Error::InvalidPattern(Expr(uexpr, type_)));
     }
-    Ok(match uexpr {
+    Ok(match uexpr.clone() {
         UExpr::IntLiteral(n) => Pattern::IntLiteral(n),
         UExpr::Ident(name) => Pattern::Ident(name.clone()),
         UExpr::Wildcard => Pattern::Wildcard,
@@ -607,6 +608,16 @@ fn expr_to_pattern(Expr(uexpr, type_): Expr) -> Result<Pattern> {
                 _ => return Err(Error::InvalidPattern(*ctor_expr)),
             };
             Pattern::Variant(ctor_name, params)
+        },
+        UExpr::List(pattern_blocks) => {
+            let mut patterns = Vec::new();
+            for pattern_block in &pattern_blocks {
+                match &pattern_block[..] {
+                    [pattern_expr] => patterns.push(expr_to_pattern(pattern_expr.clone())?),
+                    _ => return Err(Error::InvalidPattern(Expr(uexpr, type_))),
+                };
+            }
+            Pattern::List(patterns)
         },
         _ => return Err(Error::InvalidPattern(Expr(uexpr, type_))),
     })
