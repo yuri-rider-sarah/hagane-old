@@ -6,6 +6,7 @@ use unic_ucd_common::is_white_space;
 pub enum Token {
     IntLiteral(i64),
     CharLiteral(char),
+    StringLiteral(String),
     Ident(String),
     Wildcard,
     PriKeyword(String),
@@ -122,6 +123,7 @@ fn read_quoted_char(chars: &Vec<char>, state: &mut LexerState) -> Result<char> {
         Some('\\') => match read_char(chars, state) {
             Some('\\') => '\\',
             Some('n') => '\n',
+            Some('"') => '"',
             c => return Err(Error::UnexpectedChar(c)),
         },
         Some(c) => c,
@@ -232,6 +234,20 @@ fn read_token_(chars: &Vec<char>, state: &mut LexerState, or_indent: Option<usiz
                 Hash
             },
             None => Hash,
+        },
+        '"' => {
+            let mut s = String::new();
+            loop {
+                match read_char(chars, state) {
+                    Some('"') => break,
+                    Some(_) => {
+                        state.pos -= 1;
+                        s.push(read_quoted_char(chars, state)?)
+                    },
+                    None => return Err(Error::UnexpectedChar(None)),
+                }
+            }
+            StringLiteral(s)
         },
         '0'..='9' => {
             let mut n = 0;
