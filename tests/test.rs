@@ -106,3 +106,5 @@ test!(match_list, "7");
 test!(match_nested, "4");
 test!(char_literal, "97\n33\n32\n41\n34\n92\n10\n960\n8595\n128512");
 test!(string_literal, "97\n33\n32\n41\n34\n92\n10\n960\n8595\n128512");
+test!(print_byte, "A!\0😀");
+test!(argv, "1\ntests/argv.hgn.out");

@@ -177,6 +177,42 @@ unsafe fn codegen_binary_cmp_primitive(name: &str, cmp: LLVMIntPredicate, contex
     )
 }
 
+unsafe fn codegen_c_function(name: &str, param_types: Vec<Type>, ret_type: Type, context: &mut Context) -> Result<()> {
+    let mut c_param_types = Vec::new();
+    for param_type in &param_types {
+        c_param_types.push(match param_type {
+            Type::Named(name_int) if name_int == "Int" => LLVMInt64Type(),
+            _ => return Err(Error::TypeNotInFFI(param_type.clone())),
+        })
+    }
+    let c_ret_type = match &ret_type {
+        Type::Tuple(elems) if elems.len() == 0 => LLVMVoidType(),
+        Type::Named(name_int) if name_int == "Int" => LLVMInt64Type(),
+        _ => return Err(Error::TypeNotInFFI(ret_type.clone())),
+    };
+    let c_func_name = CString::new(name).unwrap();
+    let llvm_c_func_type = LLVMFunctionType(c_ret_type, c_param_types.as_mut_ptr(), c_param_types.len() as u32, 0);
+    let c_func = LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type);
+    codegen_primitive_function(
+        name,
+        None,
+        param_types.clone(),
+        ret_type.clone(),
+        |func, context| {
+            let mut args = Vec::new();
+            for (i, &c_param_type) in c_param_types.iter().enumerate() {
+                args.push(codegen_load(LLVMGetParam(func, i as u32), c_param_type, context));
+            }
+            let ret = LLVMBuildCall(context.builder, c_func, args.as_mut_ptr(), args.len() as u32, &0);
+            Ok(match &ret_type {
+                Type::Tuple(elems) if elems.len() == 0 => codegen_box(LLVMGetUndef(unit_type()), unit_type(), context),
+                _ => codegen_box(ret, c_ret_type, context),
+            })
+        },
+        context,
+    )
+}
+
 pub unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
     {
         let c_func_name = CString::new("div_by_zero_error").unwrap();
@@ -196,37 +232,13 @@ pub unsafe fn codegen_primitives(context: &mut Context) -> Result<()> {
     codegen_binary_cmp_primitive("≤", LLVMIntSLE, context)?;
     codegen_binary_cmp_primitive(">", LLVMIntSGT, context)?;
     codegen_binary_cmp_primitive("≥", LLVMIntSGE, context)?;
-    let print_c_func = {
-        let c_func_name = CString::new("print_int").unwrap();
-        let mut func_param_types = vec![LLVMInt64Type()];
-        let llvm_c_func_type = LLVMFunctionType(LLVMVoidType(), func_param_types.as_mut_ptr(), func_param_types.len() as u32, 0);
-        LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
-    };
-    codegen_primitive_function(
-        "print_int",
-        None,
-        vec![Type::Named("Int".to_string())],
-        Type::Tuple(Vec::new()),
-        |func, context| {
-            let mut args = vec![codegen_load(LLVMGetParam(func, 0), LLVMInt64Type(), context)];
-            LLVMBuildCall(context.builder, print_c_func, args.as_mut_ptr(), args.len() as u32, &0);
-            Ok(codegen_box(LLVMGetUndef(unit_type()), unit_type(), context))
-        },
-        context,
-    )?;
-    let read_c_func = {
-        let c_func_name = CString::new("read_int").unwrap();
-        let llvm_c_func_type = LLVMFunctionType(LLVMInt64Type(), std::ptr::null_mut(), 0, 0);
-        LLVMAddFunction(context.module, c_func_name.as_ptr(), llvm_c_func_type)
-    };
-    codegen_primitive_function(
-        "read_int",
-        None,
-        vec![],
-        Type::Named("Int".to_string()),
-        |_, context| Ok(codegen_box(LLVMBuildCall(context.builder, read_c_func, std::ptr::null_mut(), 0, &0), LLVMInt64Type(), context)),
-        context,
-    )?;
+    codegen_c_function("print_int", vec![Type::Named("Int".to_string())], Type::Tuple(Vec::new()), context)?;
+    codegen_c_function("read_int", vec![], Type::Named("Int".to_string()), context)?;
+    codegen_c_function("print_byte", vec![Type::Named("Int".to_string())], Type::Tuple(Vec::new()), context)?;
+    codegen_c_function("read_byte", vec![], Type::Named("Int".to_string()), context)?;
+    codegen_c_function("get_argc", vec![], Type::Named("Int".to_string()), context)?;
+    codegen_c_function("get_argv_len", vec![Type::Named("Int".to_string())], Type::Named("Int".to_string()), context)?;
+    codegen_c_function("get_argv_byte", vec![Type::Named("Int".to_string()), Type::Named("Int".to_string())], Type::Named("Int".to_string()), context)?;
     codegen_primitive(
         "empty",
         Some(vec!["T".to_string()]),

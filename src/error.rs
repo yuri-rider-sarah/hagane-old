@@ -25,6 +25,7 @@ pub enum Error {
     PolymorphicMut,
     ConflictingPatternType,
     NotAConstructor(String),
+    TypeNotInFFI(Type),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
