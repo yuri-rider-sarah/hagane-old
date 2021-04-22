@@ -177,7 +177,7 @@ unsafe fn codegen_binary_cmp_primitive(name: &str, cmp: LLVMIntPredicate, contex
     )
 }
 
-unsafe fn codegen_c_function(name: &str, param_types: Vec<Type>, ret_type: Type, context: &mut Context) -> Result<()> {
+pub unsafe fn codegen_c_function(name: &str, param_types: Vec<Type>, ret_type: Type, context: &mut Context) -> Result<()> {
     let mut c_param_types = Vec::new();
     for param_type in &param_types {
         c_param_types.push(match param_type {

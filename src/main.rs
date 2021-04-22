@@ -16,6 +16,7 @@ fn main() {
     let mut print_ir_unopt = false;
     let mut print_ir = false;
     let mut opt_level = 0;
+    let mut object_files = Vec::new();
     let inline_threshold = 225;
     for arg in std::env::args().skip(1) {
         if arg.starts_with("-") {
@@ -26,6 +27,7 @@ fn main() {
                 "O3" => opt_level = 3,
                 "print-ir-unopt" => print_ir_unopt = true,
                 "print-ir" => print_ir = true,
+                arg if arg.starts_with("L") => object_files.push(arg[1..].to_string()),
                 _ => {
                     eprintln!("Invalid argument: {}", arg);
                     std::process::exit(1);
@@ -122,8 +124,10 @@ fn main() {
         let program_main: &[u8] = std::include_bytes!("program_main.c");
         let main_path = temp_dir.path().clone().join(std::path::Path::new("main.c")).to_str().unwrap().to_string();
         std::fs::write(&main_path, program_main).unwrap();
+        let mut args: Vec<_> = object_files.iter().map(|object_file| &object_file[..]).collect();
+        args.append(&mut vec![&obj_path[..], &main_path[..], "-static", "-o", &dest_file[..]]);
         let clang_exit_code = std::process::Command::new("clang")
-            .args(&[&obj_path[..], &main_path[..], "-static", "-o", &dest_file[..]])
+            .args(&args)
             .status()
             .unwrap();
         if !clang_exit_code.success() {

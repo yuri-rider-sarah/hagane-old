@@ -20,6 +20,7 @@ pub enum UExpr {
     Type(String, Option<Vec<String>>, Vec<(String, Vec<Type>)>),
     Match(Box<Expr>, Vec<(Pattern, Vec<Expr>)>),
     List(Vec<Vec<Expr>>),
+    Extern(String, Type),
 }
 
 #[derive(Clone, Debug)]
@@ -247,6 +248,13 @@ fn uexpr_from_clauses(keyword: &str, clauses: &Vec<Clause>) -> Result<UExpr> {
                 }
             }
             UExpr::List(elements)
+        },
+        "extern" => match &clauses[..] {
+            [Block(name_exprs), Block(type_exprs)] => match (&name_exprs[..], &type_exprs[..]) {
+                ([Expr(UExpr::Ident(name), None)], [type_expr]) => UExpr::Extern(name.clone(), expr_to_type(type_expr.clone())?),
+                _ => return Err(Error::InvalidExpr),
+            }
+            _ => return Err(Error::InvalidExpr),
         },
         _ => return Err(Error::InvalidExpr),
     })

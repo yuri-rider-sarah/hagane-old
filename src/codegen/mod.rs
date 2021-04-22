@@ -1,6 +1,7 @@
 mod primitives;
 mod util;
 
+use crate::codegen::primitives::*;
 use crate::codegen::util::*;
 use crate::error::*;
 use crate::parser::Expr;
@@ -318,6 +319,13 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
             }
             codegen_unit(context)
         },
+        Extern(name, type_) => match type_ {
+            Type::Function(param_types, ret_type) => {
+                codegen_c_function(name, param_types.clone(), *ret_type.clone(), context)?;
+                codegen_unit(context)
+            }
+            _ => return Err(Error::TypeNotInFFI(type_.clone())),
+        }
         If(cond, then, else_) => {
             let (cond_val_ptr, cond_type) = codegen_block(cond, context)?;
             if cond_type != Type::Named("Bool".to_string()) {
