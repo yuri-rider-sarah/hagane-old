@@ -20,6 +20,7 @@ macro_rules! test {
             let _deleter = Deleter { file: concat!("tests/", stringify!($name), ".hgn.out") };
             let compiler_out = std::process::Command::new(COMPILER_PATH)
                 .arg(concat!("tests/", stringify!($name), ".hgn"))
+                .arg(concat!("-otests/", stringify!($name), ".hgn.out"))
                 .stderr(std::process::Stdio::inherit())
                 .output()
                 .unwrap();
@@ -41,6 +42,7 @@ macro_rules! test_fail {
             let _deleter = Deleter { file: concat!("tests/", stringify!($name), ".hgn.out") };
             let compiler_out = std::process::Command::new(COMPILER_PATH)
                 .arg(concat!("tests/", stringify!($name), ".hgn"))
+                .arg(concat!("-otests/", stringify!($name), ".hgn.out"))
                 .stderr(std::process::Stdio::inherit())
                 .output()
                 .unwrap();

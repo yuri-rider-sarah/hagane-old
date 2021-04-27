@@ -12,7 +12,8 @@ use llvm_sys::target_machine::*;
 use llvm_sys::transforms::pass_manager_builder::*;
 
 fn main() {
-    let mut main_args = Vec::new();
+    let mut input_files = Vec::new();
+    let mut output_file = None;
     let mut print_ir_unopt = false;
     let mut print_ir = false;
     let mut opt_level = 0;
@@ -28,24 +29,31 @@ fn main() {
                 "print-ir-unopt" => print_ir_unopt = true,
                 "print-ir" => print_ir = true,
                 arg if arg.starts_with("L") => object_files.push(arg[1..].to_string()),
+                arg if arg.starts_with("o") => match output_file {
+                    None => output_file = Some(arg[1..].to_string()),
+                    Some(_) => {
+                        eprintln!("Multiple output files specified");
+                        std::process::exit(1);
+                    },
+                },
                 _ => {
                     eprintln!("Invalid argument: {}", arg);
                     std::process::exit(1);
                 },
             }
         } else {
-            main_args.push(arg);
+            input_files.push(arg);
         }
     }
-    let (src_file, dest_file) = match &main_args[..] {
-        [src] => (src.clone(), src.clone() + ".out"),
-        [src, dest] => (src.clone(), dest.clone()),
-        _ => {
-            eprintln!("Invalid arguments");
-            std::process::exit(1);
-        },
-    };
-    let chars: Vec<_> = std::fs::read_to_string(&src_file).unwrap().chars().collect();
+    if input_files.len() == 0 {
+        eprintln!("No input files");
+        std::process::exit(1);
+    }
+    let output_file = output_file.unwrap_or("out".to_string());
+    let mut chars = Vec::new();
+    for input_file in &input_files {
+        chars.append(&mut std::fs::read_to_string(input_file).unwrap().chars().collect());
+    }
     let mut tokens = lexer::Tokens::new(chars).unwrap();
     let mut exprs = Vec::new();
     loop {
@@ -125,7 +133,7 @@ fn main() {
         let main_path = temp_dir.path().clone().join(std::path::Path::new("main.c")).to_str().unwrap().to_string();
         std::fs::write(&main_path, program_main).unwrap();
         let mut args: Vec<_> = object_files.iter().map(|object_file| &object_file[..]).collect();
-        args.append(&mut vec![&obj_path[..], &main_path[..], "-static", "-o", &dest_file[..]]);
+        args.append(&mut vec![&obj_path[..], &main_path[..], "-static", "-o", &output_file[..]]);
         let clang_exit_code = std::process::Command::new("clang")
             .args(&args)
             .status()
