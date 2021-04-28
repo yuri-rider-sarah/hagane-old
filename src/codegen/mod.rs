@@ -411,21 +411,16 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
         Lambda(expr_params, body) => {
             let parent = LLVMGetInsertBlock(context.builder);
             let param_types_: Vec<_> = expr_params.iter().map(|Expr(_, t)| t.clone()).collect();
-            let ret_type_ = match body.last() {
-                Some(Expr(_, t)) => t.clone(),
-                None => Some(Type::Tuple(Vec::new())),
-            };
-            let (param_types, ret_type) = match stated_type {
+            let param_types = match stated_type {
                 Some(type_) => match &type_ {
-                    Type::Function(param_types, ret_type) => {
+                    Type::Function(param_types, _) => {
                         if param_types.len() != expr_params.len() {
                             return Err(Error::MismatchedParamsNum(param_types.len(), expr_params.len()));
                         }
                         for (param_type_, param_type) in Iterator::zip(param_types_.iter(), param_types.iter()) {
                             check_type_compat(param_type_, param_type)?;
                         }
-                        check_type_compat(&ret_type_, ret_type)?;
-                        (param_types.clone(), *ret_type.clone())
+                        param_types.clone()
                     },
                     _ => return Err(Error::NotAFunction(type_.clone())),
                 },
@@ -434,7 +429,7 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                     for param_type_ in param_types_ {
                         param_types.push(param_type_.ok_or(Error::AmbiguousType)?);
                     }
-                    (param_types, ret_type_.ok_or(Error::AmbiguousType)?)
+                    param_types
                 },
             };
             let mut captures_types = Vec::new();
@@ -479,11 +474,19 @@ unsafe fn codegen(Expr(uexpr, stated_type): &Expr, context: &mut Context) -> Res
                     _ => return Err(Error::AssignToExpr),
                 }
             }
-            let (ret_val, inferred_ret_type) = codegen_block(body, &mut Context { names: inner_names, .. *context })?;
+            let (ret_val, ret_type) = codegen_block(body, &mut Context { names: inner_names, .. *context })?;
             LLVMBuildRet(context.builder, ret_val);
-            if ret_type != inferred_ret_type {
-                return Err(Error::ConflictingType(inferred_ret_type, ret_type.clone()));
-            }
+            match stated_type {
+                Some(type_) => match &type_ {
+                    Type::Function(_, stated_ret_type) => {
+                        if **stated_ret_type != ret_type {
+                            return Err(Error::ConflictingType(*stated_ret_type.clone(), ret_type));
+                        }
+                    }
+                    _ => (),
+                }
+                _ => (),
+            };
             LLVMPositionBuilderAtEnd(context.builder, parent);
             let captures = LLVMBuildMalloc(context.builder, captures_type, &0);
             for (i, (_, var)) in context.names.iter().enumerate() {
