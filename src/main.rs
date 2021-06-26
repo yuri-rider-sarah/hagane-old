@@ -90,7 +90,7 @@ fn main() {
             cpu.as_ptr(),
             features.as_ptr(),
             LLVMCodeGenOptLevel::LLVMCodeGenLevelDefault,
-            LLVMRelocMode::LLVMRelocDefault,
+            LLVMRelocMode::LLVMRelocPIC,
             LLVMCodeModel::LLVMCodeModelDefault,
         );
         let module = codegen::codegen_top(&exprs).unwrap();
