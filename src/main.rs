@@ -133,7 +133,7 @@ fn main() {
         let main_path = temp_dir.path().clone().join(std::path::Path::new("main.c")).to_str().unwrap().to_string();
         std::fs::write(&main_path, program_main).unwrap();
         let mut args: Vec<_> = object_files.iter().map(|object_file| &object_file[..]).collect();
-        args.append(&mut vec![&obj_path[..], &main_path[..], "-static", "-o", &output_file[..]]);
+        args.append(&mut vec![&obj_path[..], &main_path[..], "-o", &output_file[..]]);
         let clang_exit_code = std::process::Command::new("clang")
             .args(&args)
             .status()
